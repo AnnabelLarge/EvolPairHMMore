@@ -94,7 +94,7 @@ def train_ggi(args):
             elif longest_seqlen <= 1800:
                 return 1800
             else:
-                return 2326
+                return 2324
         
         
     ##############
@@ -171,7 +171,7 @@ def train_ggi(args):
     ### 2: TRAINING LOOP   #
     ########################
     ### 2.1: transform the initial indel params from the config file to lie on 
-    ### domain (-inf, inf); these are the initializations for the indel params
+    ### domain (-inf, inf)
     lam_transf = jnp.sqrt(args.lam)
     mu_transf = jnp.sqrt(args.mu)
     x_transf = jnp.sqrt(-jnp.log(args.x))
@@ -212,7 +212,7 @@ def train_ggi(args):
                 batch_max_seqlen = None
             
             # take a step using minibatch gradient descent
-            out = train_fn_jitted(data = batch, 
+            out = train_fn(data = batch, 
                                   t_arr = t_array, 
                                   subst_rate_mat = subst_rate_mat, 
                                   equl_pi_mat = equl_pi_mat,
@@ -346,7 +346,7 @@ def train_ggi(args):
             # rage quit
             break
         
-        # remember this epoch's parameters for next iteration
+        # remember this epoch's loss for next iteration
         prev_test_loss = ave_epoch_test_loss
         
         

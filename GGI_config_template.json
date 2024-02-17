@@ -1,16 +1,16 @@
 {
 	"training_wkdir": "RESULTS",
-	"runname": "run1",
+	"runname": "run2",
 	"rng_seednum": 35,
 
-	"have_precalculated_counts": true,
+	"have_precalculated_counts": false,
 	"loadtype": "eager",
-	"data_dir": "DEV-DATA_precomputed_counts",
-	"train_dset_splits": ["FiveSamp", "TwoSamp", "OneSamp"],
-	"test_dset_splits": ["FiveSamp", "TwoSamp", "OneSamp"],
+	"data_dir": "DEV-DATA_pair_alignments",
+	"train_dset_splits": ["FiveSamp"],
+	"test_dset_splits": ["FiveSamp"],
 	"batch_size": 5,
 
-	"num_epochs": 50,
+	"num_epochs": 1000,
 	"learning_rate": 0.01,
 	"patience": 5,
 
@@ -20,10 +20,10 @@
 	"t_grid_num_steps": 20,
 	"norm": false,
 
-	"lam": 0.5,
-	"mu": 0.5,
-	"x": 0.5,
-	"y": 0.5,
+	"lam": 0.9,
+	"mu": 0.9,
+	"x": 0.1,
+	"y": 0.1,
 
 	"diffrax_params": {
 		"step": null,

@@ -59,7 +59,7 @@ def count_insertions(batch, ins_pos_mask, alphabet_size=20):
     count different types of insertions i.e. emissions at insert states
     yields a (alphabet_size,) vector for the whole batch
     
-    unlike other counting methods, this can operate on the whole batch at once
+    this can operate on the whole batch at once
     """
     ### what got inserted = what amino acid is in the descendant sequence at insertion site
     all_inserts = batch[:, 1, :] * ins_pos_mask
@@ -67,13 +67,33 @@ def count_insertions(batch, ins_pos_mask, alphabet_size=20):
     ### count the number of valid tokens
     # this gets vmapped over the valid alphabet
     valid_toks = jnp.arange(3,alphabet_size+3)
-    def count_insertions(tok):
+    def count_ins(tok):
         return (all_inserts == tok).sum(axis=1)
-    vmapped_count_insertions = jax.vmap(count_insertions, in_axes=0)
+    vmapped_count_ins = jax.vmap(count_ins, in_axes=0)
     
-    insCounts = vmapped_count_insertions(valid_toks)
+    insCounts = vmapped_count_ins(valid_toks)
     return insCounts.T
 
+
+def count_deletions(batch, del_pos_mask, alphabet_size=20):
+    """
+    count different types of deletions i.e. what gets removed from the ancestor
+    yields a (alphabet_size,) vector for the whole batch
+    
+    this can operate on the whole batch at once
+    """
+    ### what got inserted = what amino acid is in the ancestor sequence at deletion site
+    all_dels = batch[:, 0, :] * del_pos_mask
+    
+    ### count the number of valid tokens
+    # this gets vmapped over the valid alphabet
+    valid_toks = jnp.arange(3,alphabet_size+3)
+    def count_dels(tok):
+        return (all_dels == tok).sum(axis=1)
+    vmapped_count_dels = jax.vmap(count_dels, in_axes=0)
+    
+    delCounts = vmapped_count_dels(valid_toks)
+    return delCounts.T
 
 
 def count_transitions(one_alignment_path, start_idxes):
@@ -168,7 +188,7 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     
     
     ### clean up variables
-    del non_gaps, gaps, del_pos, paths_compressed
+    del non_gaps, gaps, paths_compressed
     
     
     ######################################
@@ -192,6 +212,15 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     del ins_pos
     
     
+    #######################################
+    ### COUNT DELETED CHARS FROM ANCESTOR #
+    #######################################
+    delCounts_persamp = count_deletions(batch = batch,
+                                        del_pos_mask = del_pos,
+                                        alphabet_size=alphabet_size)
+    del del_pos
+    
+    
     #######################
     ### COUNT TRANSITIONS #
     #######################
@@ -204,4 +233,4 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     transCounts_persamp = counttrans_vmapped(paths_with_extra_start_end_matches, 
                                              start_idxes)
 
-    return (subCounts_persamp, insCounts_persamp, transCounts_persamp)
+    return (subCounts_persamp, insCounts_persamp, delCounts_persamp, transCounts_persamp)
