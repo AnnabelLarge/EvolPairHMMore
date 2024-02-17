@@ -6,8 +6,8 @@
 	"have_precalculated_counts": true,
 	"loadtype": "eager",
 	"data_dir": "DEV-DATA_precomputed_counts",
-	"train_dset_splits": ["FiveSamp"],
-	"test_dset_splits": ["FiveSamp"],
+	"train_dset_splits": ["FiveSamp", "TwoSamp", "OneSamp"],
+	"test_dset_splits": ["FiveSamp", "TwoSamp", "OneSamp"],
 	"batch_size": 5,
 
 	"num_epochs": 50,
