@@ -1,0 +1,3 @@
+OneSamp	1
+TwoSamp	2
+FiveSamp	5
