@@ -118,19 +118,19 @@ def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed,
             cond_logprob_persamp_at_t = conditional_loglike(all_counts, 
                                                             all_logprobs_at_t)
             
-            # ### 2.2: find marginal log likelihood of ancestor: logP(ancestor)
-            # marg_logprob_perAnc = marginal_loglike_Anc(all_counts[2], 
-            #                                            logprob_indel, 
-            #                                            lam, 
-            #                                            mu)
+            ### 2.2: find marginal log likelihood of ancestor: logP(ancestor)
+            # not factoring in ancestor length!!!
+            marg_logprob_perAnc = marginal_loglike_Anc(all_counts[2], 
+                                                        logprob_indel, 
+                                                        None, 
+                                                        None)
             
-            # ### 2.3: Joint probability: logP(anc, desc, align) = 
-            # #        logP(desc, align | ancestor, t) + logP(ancestor)
-            # alignment_logprob_persamp_at_t = (cond_logprob_persamp_at_t + 
-            #                                   marg_logprob_perAnc)
+            ### 2.3: Joint probability: logP(anc, desc, align) = 
+            #        logP(desc, align | ancestor, t) + logP(ancestor)
+            alignment_logprob_persamp_at_t = (cond_logprob_persamp_at_t + 
+                                              marg_logprob_perAnc)
             
-            return cond_logprob_persamp_at_t
-            # return alignment_logprob_persamp_at_t
+            return alignment_logprob_persamp_at_t
         
         ### do the log probability calculation for all times t
         ###   output is (num_timepoints, num_samples)
@@ -250,19 +250,19 @@ def eval_fn(data, t_arr, subst_rate_mat, equl_pi_mat,
         cond_logprob_persamp_at_t = conditional_loglike(all_counts, 
                                                         all_logprobs_at_t)
         
-        # ### 2.2: find marginal log likelihood of ancestor: logP(ancestor)
-        # marg_logprob_perAnc = marginal_loglike_Anc(all_counts[2], 
-        #                                            logprob_indel, 
-        #                                            lam, 
-        #                                            mu)
+        ### 2.2: find marginal log likelihood of ancestor: logP(ancestor)
+        # not factoring in ancestor length!!!
+        marg_logprob_perAnc = marginal_loglike_Anc(all_counts[2], 
+                                                    logprob_indel, 
+                                                    None, 
+                                                    None)
         
-        # ### 2.3: Joint probability: logP(anc, desc, align) = 
-        # #        logP(desc, align | ancestor, t) + logP(ancestor)
-        # alignment_logprob_persamp_at_t = (cond_logprob_persamp_at_t + 
-        #                                   marg_logprob_perAnc)
+        ### 2.3: Joint probability: logP(anc, desc, align) = 
+        #        logP(desc, align | ancestor, t) + logP(ancestor)
+        alignment_logprob_persamp_at_t = (cond_logprob_persamp_at_t + 
+                                          marg_logprob_perAnc)
         
-        # return alignment_logprob_persamp_at_t
-        return cond_logprob_persamp_at_t
+        return alignment_logprob_persamp_at_t
     
     
     ### do the log probability calculation for all times t

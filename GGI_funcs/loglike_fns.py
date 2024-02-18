@@ -54,36 +54,27 @@ def conditional_loglike(all_counts, all_logprobs):
     return cond_logprob
 
 
-# We replace zeroes and infinities with small numbers sometimes
-# It's sinful but BOY DO I LOVE SIN
-smallest_float32 = jnp.finfo('float32').smallest_normal
-
-
-def marginal_loglike_Anc(delCounts, logprob_indel, lam, mu):
+def marginal_loglike_Anc(delCounts_persamp, indel_logprobs, lam=None, mu=None):
     """
-    logP(anc) = 
+    logP(anc) =
       1.) logP( deleted ancestor characters even existing in the first place )
+    
+      [DON'T INCLUDE THIS TERM; INTRODUCES HEADACHES AND NUMERICAL INSTABILITY']
       2.) logP( number of deleted characters, assumed to follow a geometric 
                 distribution )
-    
-    THIS HAS NUMERICAL STABILITY ERRORS :(
-        > if mu == 0, logprob_geometric_del_len is undefined
-        > if mu == lambda, logprob_geometric_del_len is undefined
+
     """
     # Probability of deleted ancestor characters even existing in the
     # first place
-    prob_deleted_anc_chars = jnp.einsum('ij, j -> i',  
-                                        delCounts, 
-                                        logprob_indel)
+    prob_deleted_anc_chars = jnp.tensordot(delCounts_persamp, indel_logprobs,
+                                           axes=[(1), (0)])
     
-    # Probability of number of deletions
-    prob_geometric_del_len = (delCounts.sum(axis=1) * jnp.log(lam/mu) +
-                              jnp.log( 1 - (lam/mu) ) )
+    # # Probability of number of deletions
+    # prob_geometric_del_len = (delCounts.sum(axis=1) * jnp.log(lam/mu) +
+    #                           jnp.log( 1 - (lam/mu) ) )
     
-    # add these together
-    marg_logprob_perAnc = prob_deleted_anc_chars + prob_geometric_del_len
+    # # add these together
+    # marg_logprob_perAnc = prob_deleted_anc_chars + prob_geometric_del_len
     
-    return marg_logprob_perAnc
-
-
-
+    return prob_deleted_anc_chars
+    # return  marg_logprob_perAnc
