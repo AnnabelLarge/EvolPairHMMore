@@ -55,6 +55,4 @@ Two ways to run this (triggered by `have_precalculated_counts`):
 
 
 ## To do
-- Make the loss symmetric by also including probabilities from deleted ancestral sites
-  - NOTE: I am getting numerical stability errors when accounting for geometrically distributed deletion length
-  - tried adding small value to mu (3e-8 was the smallest value to be detected by jax jit), but I think this threw training off; different initial values yielded different MLE parameter estimates (which should NOT be happening)
+- Implement mixture model
