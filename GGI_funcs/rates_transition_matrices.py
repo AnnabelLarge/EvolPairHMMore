@@ -41,13 +41,13 @@ def lg_rate_mat(equl_pi_vec, file_path):
     raw_rate_mat = jnp.einsum('ij, i -> ij', exch_r_mat, equl_pi_vec)
     
     ### now mask out diagonals with zeros
-    mask = jnp.abs(1 - jnp.eye(20,20))
+    mask = jnp.abs(1 - jnp.eye(equl_pi_vec.shape[0]))
     rate_mat_without_diags = raw_rate_mat * mask
     
     ### fill in values for i == j such that rows sum to zero
     row_sums_without_diag = jnp.expand_dims(rate_mat_without_diags.sum(axis=1), 1)
-    rows_sums_copied = jnp.repeat(-row_sums_without_diag, 20, axis=1)
-    mask = jnp.eye(20,20)
+    rows_sums_copied = jnp.repeat(-row_sums_without_diag, equl_pi_vec.shape[0], axis=1)
+    mask = jnp.eye(equl_pi_vec.shape[0])
     diags_to_add = mask * rows_sums_copied
     
     

@@ -31,13 +31,16 @@ Data to be read:
 2. insCounts.npy: (num_pairs, 20)
     counts of emissions at insert states across whole alignment length
 
-3. transCounts.npy: (num_pairs, 3, 3)
+3. delCounts.npy: (num_pairs, 20)
+    counts of bases that get deleted
+
+4. transCounts.npy: (num_pairs, 3, 3)
     transition counts across whole alignment length
 
-4. AAcounts.npy: (20, )
+5. AAcounts.npy: (20, )
     equilibrium counts from whole dataset
 
-5. metadata.tsv: [PANDAS DATAFRAME]
+6. metadata.tsv: [PANDAS DATAFRAME]
     metadata about each sample
 
 
@@ -60,6 +63,7 @@ class HMMDset_PC(Dataset):
         ### iterate through split prefixes and read files
         subCounts_list = []
         insCounts_list = []
+        delCounts_list = []
         transCounts_list = []
         self.AAcounts = np.zeros(20, dtype=int)
         metadata_list = []
@@ -72,6 +76,10 @@ class HMMDset_PC(Dataset):
             # insCounts
             with open(f'./{data_dir}/{split}_insCounts.npy', 'rb') as f:
                 insCounts_list.append(np.load(f))
+            
+            # delCounts
+            with open(f'./{data_dir}/{split}_delCounts.npy', 'rb') as f:
+                delCounts_list.append(np.load(f))
             
             # transCounts
             with open(f'./{data_dir}/{split}_transCounts.npy', 'rb') as f:
@@ -93,6 +101,9 @@ class HMMDset_PC(Dataset):
         self.insCounts = np.concatenate(insCounts_list, axis=0)
         del insCounts_list
         
+        self.delCounts = np.concatenate(delCounts_list, axis=0)
+        del delCounts_list
+        
         self.transCounts = np.concatenate(transCounts_list, axis=0)
         del transCounts_list
         
@@ -112,11 +123,12 @@ class HMMDset_PC(Dataset):
     def __getitem__(self, idx):
         sample_subCounts = self.subCounts[idx, :]
         sample_insCounts = self.insCounts[idx, :]
+        sample_delCounts = self.delCounts[idx, :]
         sample_transCounts = self.transCounts[idx, :]
         sample_align_len = self.lengths_vec[idx]
         sample_idx = idx
-        return (sample_subCounts, sample_insCounts, sample_transCounts, 
-                sample_align_len, sample_idx)
+        return (sample_subCounts, sample_insCounts, sample_delCounts, 
+                sample_transCounts, sample_align_len, sample_idx)
     
     def max_seqlen(self):
         return self.subCounts.shape[1]

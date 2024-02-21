@@ -29,6 +29,7 @@ Implement automatic parameter initialization at some point?
 """
 import os
 import pickle
+import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
@@ -49,34 +50,25 @@ def train_ggi(args):
     #################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
     #################################################
-    ### Use this training mode if you already have precalculated count matrices
+    # previous version of code allowed the option for lazy dataloading, but
+    #   since GGI model is so small, just get rid of that
+    assert args.loadtype == 'eager'
+        
+    # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
         logfile_msg = 'Reading from precalculated counts matrices before training\n'
         from onlyTrain.training_testing_fns import train_fn, eval_fn
+        from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
+        from onlyTrain.hmm_dataset import jax_collator as collator
         
-        if args.loadtype == 'eager':
-            from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
-            from onlyTrain.hmm_dataset_lazy import jax_collator as collator
-        
-        elif args.loadtype == 'lazy':
-            from onlyTrain.hmm_dataset_lazy import HMMLazyDset_PC as hmm_reader
-            from onlyTrain.hmm_dataset_lazy import jax_collator as collator
-        
-    
-    ### Use this training mode if you need to calculate emission and transition counts 
-    ###   from pair alignments
+    # Use this training mode if you need to calculate emission and transition counts 
+    #   from pair alignments
     elif not args.have_precalculated_counts:
         logfile_msg = 'Calculating counts matrices from alignments, then training\n'
         from calcCounts_Train.training_testing_fns import train_fn, eval_fn
+        from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
+        from calcCounts_Train.hmm_dataset import jax_collator as collator
         
-        if args.loadtype == 'eager':
-            from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
-            from calcCounts_Train.hmm_dataset_lazy import jax_collator as collator
-        
-        elif args.loadtype == 'lazy':
-            from calcCounts_Train.hmm_dataset_lazy import HMMLazyDset as hmm_reader
-            from calcCounts_Train.hmm_dataset_lazy import jax_collator as collator
-            
         # Later, clip the alignments to one of four possible alignment lengths, 
         #   thus jit-compiling four versions of train_fn and eval_fn 
         #   (saves time by not having to calculate counts for excess 
@@ -94,7 +86,7 @@ def train_ggi(args):
             elif longest_seqlen <= 1800:
                 return 1800
             else:
-                return 2324
+                return 2324 # the sequence-wide max length
         
         
     ##############
@@ -119,7 +111,7 @@ def train_ggi(args):
     
     # setup tensorboard writer
         writer = SummaryWriter(args.tboard_dir)
-        
+    
     
     ### 1.2: read data; build pytorch dataloaders 
     # 1.2.1: training data
@@ -130,7 +122,6 @@ def train_ggi(args):
                              batch_size = args.batch_size, 
                              shuffle = True,
                              collate_fn = collator)
-    
     
     # 1.2.2: test data
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
@@ -149,7 +140,6 @@ def train_ggi(args):
     equl_pi_mat = jnp.array(equl_pi_mat)
     
     # get the R matrix
-    # jitted_lg_rate_mat = jax.jit(lg_rate_mat)
     subst_rate_mat = lg_rate_mat(equl_pi_mat,
                                  f'./{args.data_dir}/LG08_exchangeability_r.npy')
     
@@ -201,6 +191,10 @@ def train_ggi(args):
     best_train_loss = 9999
     
     for epoch_idx in tqdm(range(args.num_epochs)):
+        # default behavior is to not save model parameters or 
+        #   eval set log likelihoods
+        record_results = False
+        
         ### 2.2: training phase
         epoch_train_loss = 0
         for batch_idx, batch in enumerate(training_dl):
@@ -212,7 +206,7 @@ def train_ggi(args):
                 batch_max_seqlen = None
             
             # take a step using minibatch gradient descent
-            out = train_fn(data = batch, 
+            out = train_fn_jitted(data = batch, 
                                   t_arr = t_array, 
                                   subst_rate_mat = subst_rate_mat, 
                                   equl_pi_mat = equl_pi_mat,
@@ -262,6 +256,7 @@ def train_ggi(args):
 
         # if the training loss is nan, stop training
         if jnp.isnan(ave_epoch_train_loss):
+            print(f'NaN training loss at epoch {epoch_idx}')
             with open(args.logfile_name,'a') as g:
                 g.write(f'NaN training loss at epoch {epoch_idx}')
             break
@@ -273,6 +268,9 @@ def train_ggi(args):
         ### 2.4: if the train loss is better than last epoch, save the 
         ###   parameters to a dictionary
         if ave_epoch_train_loss < best_train_loss:
+            # swap the flag
+            record_results = True
+            
             # unpack; undo the transformation
             lam_transf, mu_transf, x_transf, y_transf = indel_params_transformed
             lam_tosave = jnp.square(lam_transf)
@@ -301,6 +299,8 @@ def train_ggi(args):
         
         ### 2.5: also check current performance on held-out test set, and write
         ###      this to the tensorboard
+        # only comes into play if you want to record the results i.e. record_results=True
+        eval_df_lst = []
         epoch_test_loss = 0
         for batch in test_dl:
             # if you DON'T have precalculated counts matrices, will need to 
@@ -318,18 +318,39 @@ def train_ggi(args):
                                  indel_params_transformed = indel_params_transformed,
                                  diffrax_params = args.diffrax_params,
                                  max_seq_len = batch_max_seqlen)
-            batch_test_loss, _ = out
+            batch_test_loss, logprob_per_sample = out
             del out
             
             epoch_test_loss += batch_test_loss
             del batch_test_loss
             
+            # if record_results is triggered (by section 2.4), also record
+            # the log losses per sample
+            if record_results:
+                # get the batch sample labels, associated metadata
+                _, _, eval_sample_idxes = batch
+                meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
+                
+                # add loss terms
+                meta_df_forBatch['logP(ONLY_emission_at_subst)'] = logprob_per_sample[:, 0]
+                meta_df_forBatch['logP(ONLY_emissions)'] = logprob_per_sample[:, 1]
+                meta_df_forBatch['logP(ONLY_transitions)'] = logprob_per_sample[:, 2]
+                meta_df_forBatch['logP(anc, desc, align)'] = logprob_per_sample[:, 3]
+                
+                eval_df_lst.append(meta_df_forBatch)
+                
         # get the average epoch_test_loss; record
         ave_epoch_test_loss = float(epoch_test_loss/len(test_dl))
         writer.add_scalar('Loss/test set', ave_epoch_test_loss, epoch_idx)
         del epoch_test_loss, batch, batch_max_seqlen
         
-                
+        # output the metadata + losses dataframe, along with what epoch 
+        #   you're recording results; place this outside of folders
+        if record_results:
+            eval_df = pd.concat(eval_df_lst)
+            with open(f'./{args.training_wkdir}/eval_set_logprobs.tsv','w') as g:
+                g.write(f'#Logprobs using GGI indel params from epoch{epoch_idx}\n')
+                eval_df.to_csv(g, sep='\t')
             
         ### 2.6: EARLY STOPPING
         ### if test loss hasn't changed after X epochs, stop training
@@ -353,8 +374,6 @@ def train_ggi(args):
     ### when you're done with the function, close the tensorboard writer
     writer.close()
     
-
-
 
 ##########################################
 ### BASIC CLI+JSON CONFIG IMPLEMENTATION #

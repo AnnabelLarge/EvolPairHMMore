@@ -15,7 +15,7 @@ Two ways to run this (triggered by `have_precalculated_counts`):
     - `train_ggi.py` will import functions found in `calcCounts_Train` (and `GGI_funcs`, `utils`)
 
   2. Only train  (`have_precalculated_counts = TRUE`):  
-    - see `DEV-DATA_precomputed_counts` for example of inputs  
+    - unpack `DEV-DATA_precomputed_counts.tar.gz` for example of inputs  
     - `train_ggi.py` will import functions found in `onlyTrain` (and `GGI_funcs`, `utils`)
 
 

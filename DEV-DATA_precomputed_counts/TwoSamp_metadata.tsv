@@ -1,3 +1,0 @@
-	original_idx	pairID	ancestor	descendant	TREEDIST_anc-to-root	TREEDIST_desc-to-root	TREEDIST_stem-to-Root	TREEDIST_anc-to-desc	perc_seq_id	pfam	pfam_Nseqs	type	clan	alignment_length	KProt_Cluster_IDs	split_assignment
-1	3249	FW_PT0_PID003249	GFAP_HUMAN/68-376	K2C8_DANRE/114-425	1.62773	0.45521	0.38401	1.31492	0.4207119741100323	PF00038	26	Coiled-coil		312	0	OOD_VALID
-2	4228	FW_PT0_PID004228	C77A1_SOLME/28-497	C77A2_SOLME/43-509	2.2744	2.3266	2.1434	0.3142	0.7366167023554604	PF00067	50	Domain		470	6	OOD_VALID
