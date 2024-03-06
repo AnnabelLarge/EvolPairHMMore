@@ -30,6 +30,7 @@ Implement automatic parameter initialization at some point?
 import os
 import pickle
 import pandas as pd
+pd.options.mode.chained_assignment = None # this is annoying
 import numpy as np
 from tqdm import tqdm
 
@@ -237,11 +238,11 @@ def train_ggi(args):
             del lam_tosave, mu_tosave, x_tosave, y_tosave
 
 
-            # monitor how gradients update over batches of training
-            writer.add_scalar('Grads/d(lambda)', np.array(indel_param_grads[0]), idx_for_tboard)
-            writer.add_scalar('Grads/d(mu)', np.array(indel_param_grads[1]), idx_for_tboard)
-            writer.add_scalar('Grads/d(x)', np.array(indel_param_grads[2]), idx_for_tboard)
-            writer.add_scalar('Grads/d(y)', np.array(indel_param_grads[3]), idx_for_tboard)
+#            # monitor how gradients update over batches of training
+#            writer.add_scalar('Grads/d(lambda)', np.array(indel_param_grads[0]), idx_for_tboard)
+#            writer.add_scalar('Grads/d(mu)', np.array(indel_param_grads[1]), idx_for_tboard)
+#            writer.add_scalar('Grads/d(x)', np.array(indel_param_grads[2]), idx_for_tboard)
+#            writer.add_scalar('Grads/d(y)', np.array(indel_param_grads[3]), idx_for_tboard)
             del batch_idx, idx_for_tboard
 
     
@@ -328,7 +329,7 @@ def train_ggi(args):
             # the log losses per sample
             if record_results:
                 # get the batch sample labels, associated metadata
-                _, _, eval_sample_idxes = batch
+                eval_sample_idxes = batch[-1]
                 meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
                 
                 # add loss terms
@@ -338,23 +339,23 @@ def train_ggi(args):
                 meta_df_forBatch['logP(anc, desc, align)'] = logprob_per_sample[:, 3]
                 
                 eval_df_lst.append(meta_df_forBatch)
-                
+
         # get the average epoch_test_loss; record
         ave_epoch_test_loss = float(epoch_test_loss/len(test_dl))
         writer.add_scalar('Loss/test set', ave_epoch_test_loss, epoch_idx)
         del epoch_test_loss, batch, batch_max_seqlen
-        
+
         # output the metadata + losses dataframe, along with what epoch 
         #   you're recording results; place this outside of folders
         if record_results:
             eval_df = pd.concat(eval_df_lst)
-            with open(f'./{args.training_wkdir}/eval_set_logprobs.tsv','w') as g:
+            with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using GGI indel params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
-            
+
         ### 2.6: EARLY STOPPING
         ### if test loss hasn't changed after X epochs, stop training
-        if (jnp.abs(ave_epoch_test_loss - prev_test_loss) < 1e-5).all():
+        if (jnp.abs(ave_epoch_test_loss - prev_test_loss) < 1e-4).all():
             early_stopping_counter += 1
         
         if early_stopping_counter == args.patience:

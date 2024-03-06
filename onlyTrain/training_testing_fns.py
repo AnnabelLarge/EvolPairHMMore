@@ -19,7 +19,7 @@ from jax import numpy as jnp
 import optax
 from jax.scipy.special import logsumexp 
 
-from GGI_funcs.loglike_fns import all_loglikelihoods 
+from GGI_funcs.loglike_fns import all_loglike
 from GGI_funcs.rates_transition_matrices import transitionMatrix
 
 
@@ -230,7 +230,7 @@ def eval_fn(data, t_arr, subst_rate_mat, equl_pi_mat,
     ### do the log probability calculation for all times t
     ###   output is (num_timepoints, num_samples, 4)
     vmapped_apply_model_at_time_t = jax.vmap(apply_model_at_time_t)
-    alignment_logprob_persamp_across_t_arr = vmapped_apply_model_at_time_t(t_arr)
+    logprobs_persamp_across_t_arr = vmapped_apply_model_at_time_t(t_arr)
     
     ### when calculating loss, want to sum across the different loss terms,
     ### THEN logsumexp down timepoints

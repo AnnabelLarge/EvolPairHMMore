@@ -1,0 +1,24 @@
+{
+	"eval_wkdir": "RESULTS",
+	"runname": "run3",
+	"model_params_file":"./path/to/indel_params.tsv",
+
+	"have_precalculated_counts": true,
+	"loadtype": "eager",
+	"data_dir": "folder",
+	"test_dset_splits": ["split"],
+	"batch_size": 1,
+
+	"model_type": "GGI_simple",
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 20,
+	"norm": false,
+
+	"diffrax_params": {
+		"step": null,
+		"rtol": 1e-3,
+		"atol": 1e-6
+	}
+
+}
