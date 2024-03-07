@@ -11,13 +11,14 @@ These functions are used at training and evaluation time for single simple
   GGI model (no site variation, no indel rate variation, 
   no amino acid distribution variation)
 
+MADE TO WORK WITH PRECACULATED COUNTS MATRICES
+
 """
 import jax
 from jax import numpy as jnp
 import optax
 from jax.scipy.special import logsumexp 
 
-from calcCounts_Train.summarize_alignment import summarize_alignment
 from GGI_funcs.loglike_fns import all_loglike
 from GGI_funcs.rates_transition_matrices import transitionMatrix
 
@@ -27,57 +28,47 @@ from GGI_funcs.rates_transition_matrices import transitionMatrix
 smallest_float32 = jnp.finfo('float32').smallest_normal
 
 
-def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed, 
-             diffrax_params, max_seq_len=2324):
+def train_fn(all_counts, t_arr, subst_rate_mat, equl_pi_mat, 
+             indel_params_transformed, diffrax_params, alphabet_size=20):
     """
     Jit-able function to create new transition matrix given the indel
       params, find log-likelihood of both substitutions and indels, 
       and collect gradients
     
     inputs:
-        > data: data from a pytorch dataloader
+        > all_counts: precomputed counts, in this order- 
+             subst, inserts, deleted chars, and transitions
         > t_arr: array of evolutionary times you're evaluating the likelihood at; 
              sum them all together for final likelihood
-        > subst_rate_mat: rate matrix R
+        > subst_rate_mat: rate matrix Q
         > equl_pi_mat: equilibrium distribution, Pi
         > indel_params_transformed: (lam, mu, x, y) in that order, transformed 
           to domain (-inf, inf)
         > diffrax_params: some parameters to pass to diffrax
-        > max_seq_len: used to cach different versions of the jitted training 
-                       function, depending on the expected size of the input
-                       (default is to use global sequence length)
+        > alphabet_size: 20 for proteins, 4 for DNA
     
     outputs:
         > loss: negative mean log likelihood
         > all_grads: gradients w.r.t. indel parameters (pass this to optax)
         
     """
-    ### unpack batch input
-    seqs, align_lens, _ = data
-    del data
-    
-    # clip to max seq len (default behavior is to keep whole seq)
-    seqs = seqs[:, :, :max_seq_len]
-    
-    ### summarize the alignment
-    # this is a tuple that contains-
-    # (subCounts_persamp, insCounts_persamp, delCounts_persamp, transCounts_persamp)
-    all_counts = summarize_alignment(seqs, align_lens, alphabet_size=20, gap_tok=63)
-    
     ### log(P(indel at time t)) = log(equl_pi_mat)
     # if there are any zeros, replace them with smallest_float32
     equl_pi_mat = jnp.where(equl_pi_mat == 0, smallest_float32, equl_pi_mat)
     logprob_indel = jnp.log(equl_pi_mat)
     
     # TODO: add substitution parameters, weighting parameters for mixture models
-    def apply_model(indel_params):
+    def apply_model(indel_params_trans):
         # lam_t, mu_t, x_t, y_t
         ### unpack indel params; undo the domain transformation
-        lam_t, mu_t, x_t, y_t = indel_params
-        lam = jnp.square(lam_t)
-        mu = jnp.square(mu_t)
-        x = jnp.exp(-jnp.square(x_t))
-        y = jnp.exp(-jnp.square(y_t))
+        lam_trans, mu_trans, x_trans, y_trans = indel_params_trans
+        lam = jnp.square(lam_trans)
+        mu = jnp.square(mu_trans)
+        x = jnp.exp(-jnp.square(x_trans))
+        y = jnp.exp(-jnp.square(y_trans))
+        indel_params = (lam, mu, x, y)
+        del indel_params_trans, lam_trans, mu_trans, x_trans, y_trans
+        
         
         ### this calculates logprob at one time, t
         ### vmap it over time array
@@ -89,8 +80,6 @@ def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed,
             
             # 1.2: probability for transitions
             # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
-            alphabet_size = 20
-            indel_params = (lam, mu, x, y)
             transmat = transitionMatrix (t, 
                                          indel_params, 
                                          alphabet_size,
@@ -117,14 +106,19 @@ def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed,
             return alignment_logprob_persamp_at_t
         
         ### do the log probability calculation for all times t
-        ###   output is (num_timepoints, batch_size)
+        ###   output is (num_timepoints, num_samples)
         vmapped_apply_model_at_time_t = jax.vmap(apply_model_at_time_t)
         alignment_logprob_persamp_across_t_arr = vmapped_apply_model_at_time_t(t_arr)
+        num_timepoints = alignment_logprob_persamp_across_t_arr.shape[0]
         
         # logsumexp across all geometrically-spaced timepoints (this is 
-        #   effectively marginalizing out time)
-        alignment_logprob_persamp = logsumexp(alignment_logprob_persamp_across_t_arr,
-                                              axis=0)
+        #   effectively marginalizing out time); output is (num_samples, )
+        logsumexp_alignment_logprob_persamp = logsumexp(alignment_logprob_persamp_across_t_arr,
+                                                        axis=0)
+        
+        # normalize by 1/num_timepoints (this represents P(t))
+        #   output is still (num_samples,)
+        alignment_logprob_persamp = logsumexp_alignment_logprob_persamp/num_timepoints
            
         
         ### get mean log likelihood across the batch
@@ -137,7 +131,7 @@ def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed,
     ### set up the grad functions, based on above apply function
     ggi_grad_fn = jax.value_and_grad(apply_model, has_aux=False)
     
-    # return loss and gradients (grads will be passed to optax outside this loop)
+    # return loss and gradients
     loss, all_grads = ggi_grad_fn(indel_params_transformed)
     
     return (loss, all_grads)
@@ -145,54 +139,46 @@ def train_fn(data, t_arr, subst_rate_mat, equl_pi_mat, indel_params_transformed,
 
 
 
-def eval_fn(data, t_arr, subst_rate_mat, equl_pi_mat, 
-            indel_params_transformed, diffrax_params, max_seq_len=2324):
+def eval_fn(all_counts, t_arr, subst_rate_mat, equl_pi_mat, 
+            indel_params_transformed, diffrax_params, alphabet_size=20):
     """
     Jit-able function to create new transition matrix given the indel
-      params, evaluate log-likelihood of both substitutions and indels
+      params, find log-likelihood of both substitutions and indels, collect
+      gradients, and update model params with gradient descent
+    
+    Keep this signature for now, but in the future, Ian hinted at a way to 
+      extend this to other transition matrices
     
     inputs:
-        > data: data from a pytorch dataloader
+        > all_counts: precomputed counts, in this order- 
+             subst, inserts, deleted chars, and transitions
         > t_arr: array of evolutionary times you're evaluating the likelihood at; 
              sum them all together for final likelihood
-        > subst_rate_mat: rate matrix R
+        > subst_rate_mat: rate matrix Q
         > equl_pi_mat: equilibrium distribution, Pi
         > indel_params_transformed: (lam, mu, x, y) in that order, transformed 
           to domain (-inf, inf)
         > diffrax_params: some parameters to pass to diffrax
-        > max_seq_len: used to cach different versions of the jitted training 
-                       function, depending on the expected size of the input
-                       (default is to use global sequence length)
+        > alphabet_size: 20 for proteins, 4 for DNA
     
     outputs:
-        > loss: negative mean log likelihood
-        > alignment_logprob_persamp: log likelihood per pair, summed over all times in t_arr
+        > loss: negative loglikelihood
+        > logprobs_persamp: different log likelihoods calculated per pair
         
     """
-    ### unpack batch input
-    seqs, align_lens, _ = data
-    del data
-    
-    # clip to max seq len (default behavior is to keep whole seq)
-    seqs = seqs[:, :, :max_seq_len]
-    
-    ### summarize the alignment
-    # this is a tuple that contains-
-    # (subCounts_persamp, insCounts_persamp, delCounts_persamp, transCounts_persamp)
-    all_counts = summarize_alignment(seqs, align_lens, alphabet_size=20, gap_tok=63)
-    
     ### log(P(insertion at time t)) = log(equl_pi_mat)
     # if there are any zeros, replace them with smallest_float32
     equl_pi_mat = jnp.where(equl_pi_mat == 0, smallest_float32, equl_pi_mat)
     logprob_indel = jnp.log(equl_pi_mat)
     
-    # TODO: add substitution parameters, weighting parameters for mixture models
     ### unpack indel params; undo the domain transformation
-    lam_t, mu_t, x_t, y_t = indel_params_transformed
-    lam = jnp.square(lam_t)
-    mu = jnp.square(mu_t)
-    x = jnp.exp(-jnp.square(x_t))
-    y = jnp.exp(-jnp.square(y_t))
+    lam_trans, mu_trans, x_trans, y_trans = indel_params_transformed
+    lam = jnp.square(lam_trans)
+    mu = jnp.square(mu_trans)
+    x = jnp.exp(-jnp.square(x_trans))
+    y = jnp.exp(-jnp.square(y_trans))
+    indel_params = (lam, mu, x, y)
+    del indel_params_transformed, lam_trans, mu_trans, x_trans, y_trans
     
     
     ### this calculates logprob at one time, t
@@ -205,8 +191,6 @@ def eval_fn(data, t_arr, subst_rate_mat, equl_pi_mat,
         
         # 1.2: probability for transitions
         # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
-        alphabet_size = 20
-        indel_params = (lam, mu, x, y)
         transmat = transitionMatrix (t, 
                                      indel_params, 
                                      alphabet_size,
@@ -232,30 +216,39 @@ def eval_fn(data, t_arr, subst_rate_mat, equl_pi_mat,
     
     ### do the log probability calculation for all times t
     ###   output is (num_timepoints, num_samples, 4)
-    # CHECK THIS IN DEBUGGER, TO MAKE SURE RESULT IS AS EXPECTED!!!                                                 
     vmapped_apply_model_at_time_t = jax.vmap(apply_model_at_time_t)
     logprobs_persamp_across_t_arr = vmapped_apply_model_at_time_t(t_arr)
+    num_timepoints = logprobs_persamp_across_t_arr.shape[0]
     
     ### when calculating loss, want to sum across the different loss terms,
-    ### THEN logsumexp down timepoints
+    ### THEN logsumexp+divide down timepoints
     alignment_logprob_across_t_arr = logprobs_persamp_across_t_arr.sum(axis=2)
-    alignment_logprob_persamp = logsumexp(alignment_logprob_across_t_arr, axis=0)
+    logsumexp_alignment_logprob_persamp = logsumexp(alignment_logprob_across_t_arr, 
+                                                    axis=0)
+    alignment_logprob_persamp = logsumexp_alignment_logprob_persamp/num_timepoints
     mean_alignment_logprob = jnp.mean(alignment_logprob_persamp)
     loss = -mean_alignment_logprob
     
     
     ### record what losses are when masking out different terms of the loss function
-    def extract_indv_logprobs(logprobs_tensor, which_cols):
+    def extract_indv_logprobs(logprobs_tensor, which_cols, num_ts):
         mask = jnp.zeros(logprobs_tensor.shape)
         mask = mask.at[:, :, which_cols].add(1)
         masked_logprobs_tensor = logprobs_tensor * mask
         logprob_after_sum = masked_logprobs_tensor.sum(axis=2)
-        logprob_persamp = logsumexp(logprob_after_sum, axis=0)
+        logsumexp_logprob_persamp = logsumexp(logprob_after_sum, axis=0)
+        logprob_persamp = logsumexp_logprob_persamp/num_ts
         return logprob_persamp
     
-    subst_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, 0)
-    all_emission_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, [0,1])
-    trans_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, 3)
+    subst_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, 
+                                                   0, 
+                                                   num_timepoints)
+    all_emission_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, 
+                                                          [0,1], 
+                                                          num_timepoints)
+    trans_logprobs_persamp = extract_indv_logprobs(logprobs_persamp_across_t_arr, 
+                                                   3, 
+                                                   num_timepoints)
     
     logprobs_persamp = jnp.concatenate([jnp.expand_dims(subst_logprobs_persamp, 1),
                                         jnp.expand_dims(all_emission_logprobs_persamp,1),

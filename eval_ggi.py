@@ -14,10 +14,6 @@ Load aligned pfams (and optionally calculate emission and transition
 
 TODO:
 =====
-Immediate:
-----------
-- implement a mixture model version (possibly in a different script...)
-- make the logprob symmetrical 
 
 far future:
 -----------
@@ -43,6 +39,7 @@ from torch.utils.tensorboard import SummaryWriter
 # custom imports
 from utils.setup_training_dir import setup_training_dir
 from GGI_funcs.rates_transition_matrices import lg_rate_mat
+from GGI_funcs.training_testing_fns import train_fn, eval_fn
 
 
 
@@ -58,7 +55,6 @@ def eval_ggi(args):
     # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
         logfile_msg = 'Reading from precalculated counts matrices before training\n'
-        from onlyTrain.training_testing_fns import train_fn, eval_fn
         from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
         from onlyTrain.hmm_dataset import jax_collator as collator
         
@@ -66,15 +62,15 @@ def eval_ggi(args):
     #   from pair alignments
     elif not args.have_precalculated_counts:
         logfile_msg = 'Calculating counts matrices from alignments, then training\n'
-        from calcCounts_Train.training_testing_fns import train_fn, eval_fn
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
+        from calcCounts_Train.summarize_alignment import summarize_alignment
         
         # Later, clip the alignments to one of four possible alignment lengths, 
         #   thus jit-compiling four versions of train_fn and eval_fn 
         #   (saves time by not having to calculate counts for excess 
         #   padding tokens)
-        def clip_batch_inputs(batch):
+        def clip_batch_inputs(batch, global_max_seqlen):
             # unpack briefly to get max len in the batch
             batch_seqlens = batch[-2]
             longest_seqlen = batch_seqlens.max()
@@ -87,7 +83,7 @@ def eval_ggi(args):
             elif longest_seqlen <= 1800:
                 return 1800
             else:
-                return 2324 # the sequence-wide max length
+                return global_max_seqlen
         
         
     ##############
@@ -111,6 +107,7 @@ def eval_ggi(args):
                          batch_size = args.batch_size, 
                          shuffle = False,
                          collate_fn = collator)
+    test_global_max_seqlen = test_dset.max_seqlen()
     
     
     ### 1.3: get a rate matrix; {rate}_ij = {exchange_mat}_ij * pi_i where i != j
@@ -163,21 +160,29 @@ def eval_ggi(args):
     final_eval_loss = 0
     for batch in test_dl:
         # if you DON'T have precalculated counts matrices, will need to 
-        #   clip the batch inputs; otherwise, set this to None
+        #   clip the batch inputs
         if not args.have_precalculated_counts:
-            batch_max_seqlen = clip_batch_inputs(batch)
-        else:
-            batch_max_seqlen = None
+            batch_max_seqlen = clip_batch_inputs(batch, 
+                                                 global_max_seqlen = test_global_max_seqlen)
+            allCounts = summarize_alignment(batch, 
+                                            max_seq_len = batch_max_seqlen, 
+                                            alphabet_size=20, 
+                                            gap_tok=63)
+            del batch_max_seqlen
+            
+        # if you have these counts, just unpack the batch
+        elif args.have_precalculated_counts:
+            allCounts = (batch[0], batch[1], batch[2], batch[3])
         
         # evaluate batch loss
-        out = eval_fn_jitted(data = batch, 
+        out = eval_fn_jitted(all_counts = allCounts, 
                              t_arr = t_array, 
                              subst_rate_mat = subst_rate_mat, 
                              equl_pi_mat = equl_pi_mat,
-                             indel_params_transformed = model_params,
-                             diffrax_params = args.diffrax_params,
-                             max_seq_len = batch_max_seqlen)
-        batch_eval_loss, logprob_per_sample = out
+                             indel_params_transformed = indel_params_transformed,
+                             diffrax_params = args.diffrax_params, 
+                             alphabet_size=20)
+        batch_test_loss, logprob_per_sample = out
         del out
         
         final_eval_loss += batch_eval_loss

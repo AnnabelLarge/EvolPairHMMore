@@ -13,11 +13,6 @@ Load aligned pfams, optionally calculate emission and transition
 
 TODO:
 =====
-Immediate:
-----------
-- implement a mixture model version (possibly in a different script...)
-- make the logprob symmetrical 
-
 far future:
 -----------
 For now, using LG08 exchangeability matrix, but in the future, could use 
@@ -43,6 +38,7 @@ from torch.utils.tensorboard import SummaryWriter
 # custom imports
 from utils.setup_training_dir import setup_training_dir
 from GGI_funcs.rates_transition_matrices import lg_rate_mat
+from GGI_funcs.training_testing_fns import train_fn, eval_fn
 
 
 
@@ -58,7 +54,6 @@ def train_ggi(args):
     # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
         logfile_msg = 'Reading from precalculated counts matrices before training\n'
-        from onlyTrain.training_testing_fns import train_fn, eval_fn
         from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
         from onlyTrain.hmm_dataset import jax_collator as collator
         
@@ -66,15 +61,15 @@ def train_ggi(args):
     #   from pair alignments
     elif not args.have_precalculated_counts:
         logfile_msg = 'Calculating counts matrices from alignments, then training\n'
-        from calcCounts_Train.training_testing_fns import train_fn, eval_fn
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
+        from calcCounts_Train.summarize_alignment import summarize_alignment
         
         # Later, clip the alignments to one of four possible alignment lengths, 
-        #   thus jit-compiling four versions of train_fn and eval_fn 
+        #   thus jit-compiling four versions of summarize_alignment
         #   (saves time by not having to calculate counts for excess 
         #   padding tokens)
-        def clip_batch_inputs(batch):
+        def clip_batch_inputs(batch, global_max_seqlen):
             # unpack briefly to get max len in the batch
             batch_seqlens = batch[-2]
             longest_seqlen = batch_seqlens.max()
@@ -87,7 +82,7 @@ def train_ggi(args):
             elif longest_seqlen <= 1800:
                 return 1800
             else:
-                return 2324 # the sequence-wide max length
+                return global_max_seqlen
         
         
     ##############
@@ -123,6 +118,7 @@ def train_ggi(args):
                              batch_size = args.batch_size, 
                              shuffle = True,
                              collate_fn = collator)
+    training_global_max_seqlen = training_dset.max_seqlen()
     
     # 1.2.2: test data
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
@@ -132,6 +128,7 @@ def train_ggi(args):
                          batch_size = args.batch_size, 
                          shuffle = False,
                          collate_fn = collator)
+    test_global_max_seqlen = test_dset.max_seqlen()
     
     
     ### 1.3: using the equilibrium distribution from the TRAINING SET, get a
@@ -179,11 +176,15 @@ def train_ggi(args):
     tx = optax.adam(args.learning_rate)
     opt_state = tx.init(indel_params_transformed)
     
-    # jit your functions
-    train_fn_jitted = jax.jit(train_fn, static_argnames='max_seq_len')
-    eval_fn_jitted = jax.jit(eval_fn, static_argnames='max_seq_len')
-    
-    # quit training if test loss don't significantly change for X epochs
+    # jit your functions; there's an extra function if you need to 
+    #   summarize the alignment
+    train_fn_jitted = jax.jit(train_fn)
+    eval_fn_jitted = jax.jit(eval_fn)
+    if not args.have_precalculated_counts:
+        summarize_alignment_jitted = jax.jit(summarize_alignment, 
+                                             static_argnames='max_seq_len')
+        
+    # quit training if test loss increases for X epochs in a row
     prev_test_loss = 9999
     early_stopping_counter = 0
     
@@ -200,20 +201,28 @@ def train_ggi(args):
         epoch_train_loss = 0
         for batch_idx, batch in enumerate(training_dl):
             # if you DON'T have precalculated counts matrices, will need to 
-            #   clip the batch inputs; otherwise, set this to None
+            #   clip the batch inputs
             if not args.have_precalculated_counts:
-                batch_max_seqlen = clip_batch_inputs(batch)
-            else:
-                batch_max_seqlen = None
+                batch_max_seqlen = clip_batch_inputs(batch, 
+                                                     global_max_seqlen = training_global_max_seqlen)
+                allCounts = summarize_alignment(batch, 
+                                                max_seq_len = batch_max_seqlen, 
+                                                alphabet_size=20, 
+                                                gap_tok=63)
+                del batch_max_seqlen
+            
+            # if you have these counts, just unpack the batch
+            elif args.have_precalculated_counts:
+                allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
-            out = train_fn_jitted(data = batch, 
+            out = train_fn_jitted(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   subst_rate_mat = subst_rate_mat, 
                                   equl_pi_mat = equl_pi_mat,
                                   indel_params_transformed = indel_params_transformed, 
                                   diffrax_params = args.diffrax_params, 
-                                  max_seq_len = batch_max_seqlen)
+                                  alphabet_size=20)
             batch_train_loss, indel_param_grads = out
             del out
             
@@ -263,7 +272,7 @@ def train_ggi(args):
             break
         
         # free up variables
-        del batch, epoch_train_loss, batch_max_seqlen
+        del batch, allCounts, epoch_train_loss
 
 
         ### 2.4: if the train loss is better than last epoch, save the 
@@ -305,20 +314,28 @@ def train_ggi(args):
         epoch_test_loss = 0
         for batch in test_dl:
             # if you DON'T have precalculated counts matrices, will need to 
-            #   clip the batch inputs; otherwise, set this to None
+            #   clip the batch inputs
             if not args.have_precalculated_counts:
-                batch_max_seqlen = clip_batch_inputs(batch)
-            else:
-                batch_max_seqlen = None
+                batch_max_seqlen = clip_batch_inputs(batch, 
+                                                     global_max_seqlen = test_global_max_seqlen)
+                allCounts = summarize_alignment(batch, 
+                                                max_seq_len = batch_max_seqlen, 
+                                                alphabet_size=20, 
+                                                gap_tok=63)
+                del batch_max_seqlen
+            
+            # if you have these counts, just unpack the batch
+            elif args.have_precalculated_counts:
+                allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # evaluate batch loss
-            out = eval_fn_jitted(data = batch, 
+            out = eval_fn_jitted(all_counts = allCounts, 
                                  t_arr = t_array, 
                                  subst_rate_mat = subst_rate_mat, 
                                  equl_pi_mat = equl_pi_mat,
                                  indel_params_transformed = indel_params_transformed,
-                                 diffrax_params = args.diffrax_params,
-                                 max_seq_len = batch_max_seqlen)
+                                 diffrax_params = args.diffrax_params, 
+                                 alphabet_size=20)
             batch_test_loss, logprob_per_sample = out
             del out
             
@@ -343,7 +360,7 @@ def train_ggi(args):
         # get the average epoch_test_loss; record
         ave_epoch_test_loss = float(epoch_test_loss/len(test_dl))
         writer.add_scalar('Loss/test set', ave_epoch_test_loss, epoch_idx)
-        del epoch_test_loss, batch, batch_max_seqlen
+        del epoch_test_loss, batch
 
         # output the metadata + losses dataframe, along with what epoch 
         #   you're recording results; place this outside of folders
@@ -353,10 +370,18 @@ def train_ggi(args):
                 g.write(f'#Logprobs using GGI indel params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
 
+
+
+
         ### 2.6: EARLY STOPPING
-        ### if test loss hasn't changed after X epochs, stop training
-        if (jnp.abs(ave_epoch_test_loss - prev_test_loss) < 1e-4).all():
+        ### if test loss increases for X epochs in a row, stop training; reset
+        ###    counter if the loss decreases again (this is from Ian)
+        if (jnp.allclose (prev_test_loss, 
+                          jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
+                          rtol=1e-05) ):
             early_stopping_counter += 1
+        else:
+            early_stopping_counter = 0
         
         if early_stopping_counter == args.patience:
             # write to logfile
@@ -392,7 +417,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='GGI')
     
     # config files required to run
-    parser.add_argument('--config_file',
+    parser.add_argument('--config-file',
                         type = str,
                         required=True,
                         help='Load configs from file in json format.')

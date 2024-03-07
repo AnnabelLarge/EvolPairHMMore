@@ -1,18 +1,18 @@
 {
 	"training_wkdir": "RESULTS",
-	"runname": "run3",
-	"rng_seednum": 106,
+	"runname": "run",
+	"rng_seednum": 200,
 
 	"have_precalculated_counts": false,
 	"loadtype": "eager",
-	"data_dir": "DEV-DATA_pair_alignments",
-	"train_dset_splits": ["FiveSamp"],
-	"test_dset_splits": ["FiveSamp"],
+	"data_dir": "folder",
+	"train_dset_splits": ["split"],
+	"test_dset_splits": ["split"],
 	"batch_size": 5,
 
 	"num_epochs": 500,
 	"learning_rate": 0.01,
-	"patience": 5,
+	"patience": 500,
 
 	"model_type": "GGI_simple",
 	"t_grid_center": 0.1,
@@ -20,10 +20,10 @@
 	"t_grid_num_steps": 20,
 	"norm": false,
 
-	"lam": 0.1,
-	"mu": 0.1,
-	"x": 0.9,
-	"y": 0.9,
+	"lam": 0.9,
+	"mu": 0.9,
+	"x": 0.1,
+	"y": 0.1,
 
 	"diffrax_params": {
 		"step": null,

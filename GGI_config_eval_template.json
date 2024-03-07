@@ -1,6 +1,6 @@
 {
 	"eval_wkdir": "RESULTS",
-	"runname": "run3",
+	"runname": "run",
 	"model_params_file":"./path/to/indel_params.tsv",
 
 	"have_precalculated_counts": true,

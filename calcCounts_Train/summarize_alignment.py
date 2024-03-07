@@ -46,7 +46,7 @@ def count_substitutions(one_pair, match_pos_mask, alphabet_size=20):
         return masked_indicator_mat
     vmapped_identify_sub_pairs = jax.vmap(identify_sub_pairs, in_axes=1)
     
-    # apply fn; output is (seq_len, 20, 20)
+    # apply fn; output is (seq_len, alphabet_size, alphabet_size)
     subCounts_persamp_persite = vmapped_identify_sub_pairs(one_pair, match_pos_mask)
     
     # sum down the length of the sequence
@@ -54,7 +54,7 @@ def count_substitutions(one_pair, match_pos_mask, alphabet_size=20):
     return subCounts_persamp
 
 
-def count_insertions(batch, ins_pos_mask, alphabet_size=20):
+def count_insertions(seqs, ins_pos_mask, alphabet_size=20):
     """
     count different types of insertions i.e. emissions at insert states
     yields a (alphabet_size,) vector for the whole batch
@@ -62,7 +62,7 @@ def count_insertions(batch, ins_pos_mask, alphabet_size=20):
     this can operate on the whole batch at once
     """
     ### what got inserted = what amino acid is in the descendant sequence at insertion site
-    all_inserts = batch[:, 1, :] * ins_pos_mask
+    all_inserts = seqs[:, 1, :] * ins_pos_mask
     
     ### count the number of valid tokens
     # this gets vmapped over the valid alphabet
@@ -75,7 +75,7 @@ def count_insertions(batch, ins_pos_mask, alphabet_size=20):
     return insCounts.T
 
 
-def count_deletions(batch, del_pos_mask, alphabet_size=20):
+def count_deletions(seqs, del_pos_mask, alphabet_size=20):
     """
     count different types of deletions i.e. what gets removed from the ancestor
     yields a (alphabet_size,) vector for the whole batch
@@ -83,7 +83,7 @@ def count_deletions(batch, del_pos_mask, alphabet_size=20):
     this can operate on the whole batch at once
     """
     ### what got inserted = what amino acid is in the ancestor sequence at deletion site
-    all_dels = batch[:, 0, :] * del_pos_mask
+    all_dels = seqs[:, 0, :] * del_pos_mask
     
     ### count the number of valid tokens
     # this gets vmapped over the valid alphabet
@@ -129,33 +129,46 @@ def count_transitions(one_alignment_path, start_idxes):
 ###################
 ### MAIN FUNCTION #
 ###################
-def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
+def summarize_alignment(batch, max_seq_len, alphabet_size=20, gap_tok=63):
     """
-    batch should be a tensor of aligned sequences that are categorically 
-    encoded, with the following non-alphabet tokens:
+    the first element of batch should be a tensor of aligned sequences that 
+    are categorically encoded, with the following non-alphabet tokens:
          0: <pad>
          1: <bos> (not included in pairHMM data, but still reserved token)
          2: <eos> (not included in pairHMM data, but still reserved token)
         63: default gap char (but could be changed; just needs to be >=23)
     
-    batch is of size (batch_size, 2, max_seq_len), where-
+    sequence tensor is of size (batch_size, 2, max_seq_len), where-
         dim1=0: ancestor sequence, aligned (i.e. sequence contains gaps)
         dim1=1: descendant sequence, aligned (i.e. sequence contains gaps)
     
-    align_len is a vector of size (batch_size,) that has the length of the 
-        alignments
+    the second element of batch is a vector of size (batch_size,) 
+        that has the length of the alignments
+    
+    max_seq_len is how much the sequence tensor should be clipped; I implement 
+        "semi-dynamic" padding, where jax jit will cache different versions 
+        of this function for different max_seq_len values (designed for inputs 
+        with EXCESSIVE padding)
     
     Returns three tensors:
         1. subCounts_persite: counts of emissions from MATCH positions
         3. insCounts_persamp: counts of emissions from INSERT positions
         2. transCounts: counts of transitions in the batch
     """
+    ### unpack batch input to get sequences and align_lens
+    seqs, align_len, _ = batch
+    del batch
+    
+    # clip to max seq len
+    seqs = seqs[:, :, :max_seq_len]
+    
+    
     #######################################
     ### COMPRESS ALIGNMENT REPRESENTATION #
     #######################################
     ### split into gaps vs not gaps
-    non_gaps = jnp.where((batch != gap_tok) & (batch != 0), 1, 0)
-    gaps = jnp.where((batch == gap_tok), batch, 0)
+    non_gaps = jnp.where((seqs != gap_tok) & (seqs != 0), 1, 0)
+    gaps = jnp.where((seqs == gap_tok), seqs, 0)
     
     ### find matches, inserts, and deletions
     # matches found using non_gaps vector
@@ -175,13 +188,13 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     ### ADD ADDITIONAL MATCH STATES AT BEGINNING AND END OF ALIGNMENT PATHS
     ### this is part of the GGI assumptions
     # add match at the end of the paths
-    extra_end_col = jnp.zeros((batch.shape[0], 1))
+    extra_end_col = jnp.zeros((seqs.shape[0], 1))
     to_adjust = jnp.concatenate([paths_compressed, extra_end_col], axis=1)
-    x_idxes = (jnp.arange(0, batch.shape[0]))
+    x_idxes = (jnp.arange(0, seqs.shape[0]))
     with_extra_end_match = to_adjust.at[x_idxes, align_len].add(1)
     
     # add extra start at the beginning of the paths
-    extra_start_col = jnp.ones((batch.shape[0], 1))
+    extra_start_col = jnp.ones((seqs.shape[0], 1))
     paths_with_extra_start_end_matches = jnp.concatenate([extra_start_col, 
                                                           with_extra_end_match], 
                                                           axis=1).astype(int)
@@ -198,7 +211,7 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     ### vmap it along the batch dimension (dim0)
     countsubs_vmapped = jax.vmap(count_substitutions, 
                                  in_axes = (0,0, None))
-    subCounts_persamp = countsubs_vmapped(batch, 
+    subCounts_persamp = countsubs_vmapped(seqs, 
                                           match_pos,
                                           alphabet_size)
     
@@ -206,7 +219,7 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     #######################################
     ### COUNT EMISSIONS FROM INSERT STATE #
     #######################################
-    insCounts_persamp = count_insertions(batch = batch, 
+    insCounts_persamp = count_insertions(seqs = seqs, 
                                          ins_pos_mask = ins_pos, 
                                          alphabet_size=alphabet_size)
     del ins_pos
@@ -215,7 +228,7 @@ def summarize_alignment(batch, align_len, alphabet_size=20, gap_tok=63):
     #######################################
     ### COUNT DELETED CHARS FROM ANCESTOR #
     #######################################
-    delCounts_persamp = count_deletions(batch = batch,
+    delCounts_persamp = count_deletions(seqs = seqs,
                                         del_pos_mask = del_pos,
                                         alphabet_size=alphabet_size)
     del del_pos
