@@ -9,8 +9,15 @@ Created on Thu Mar  7 22:04:27 2024
 ABOUT:
 ======
 Methods to generate equilibrium distributions:
-    
 
+1. equl_base
+   > single equlibrium vector, infer from given data
+
+2. equl_dirichletMixture
+   > mixture model, sample from a dirichlet distribution
+
+3. equl_mixture
+   > mixture model, manually provide equilibrium distributions to test
 
 
 shared class methods:
@@ -78,7 +85,7 @@ class equl_base:
 
 
 ###############################################################################
-# mixture model: sample from a dirichlet distribution   #######################
+### mixture model: sample from a dirichlet distribution   #####################
 ###############################################################################
 class equl_dirichletMixture:
     def initialize_params(self, inputs_dict):
@@ -255,7 +262,7 @@ class equl_dirichletMixture:
 
 
 ###############################################################################
-# mixture model: manually provide equilibrium distributions to test   #########
+### mixture model: manually provide equilibrium distributions to test   #######
 ###############################################################################
 class equl_mixture:
     def initialize_params(self, inputs_dict):
