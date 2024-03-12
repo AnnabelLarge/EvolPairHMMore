@@ -7,7 +7,7 @@ Created on Thu Mar  7 22:04:27 2024
 
 ABOUT:
 ======
-Protein substitution models:
+Protein substitution models (i.e. the EMISSIONS from match states):
     
 1. subst_base: single substitution model with externally provided 
      exchangeability matrix (I use LG08 matrix)
@@ -20,7 +20,7 @@ Protein substitution models:
 
 shared class methods:
 =====================
-1. initialize_model(self, inputs_dict): initialize all parameters and 
+1. initialize_model(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
@@ -52,7 +52,7 @@ from tensorflow_probability.substrates import jax as tfp
 ### single substitution model   ###############################################
 ###############################################################################
 class subst_base:
-    def initialize_model(self, inputs_dict):
+    def initialize_model(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -77,11 +77,16 @@ class subst_base:
         # unpack extra hyperparameters
         equl_vecs = hparams_dict['equl_vecs']
         lg_exch_file = hparams_dict['lg_exch_file']
+        R_mat_normFunc = hparams_dict['R_mat_normFunc']
         
         # calculate the log probabilities at time t
-        # log(exp(Rt))
+        # log(exp(Rt)); (alph, alph, k_subst, k_equl)
         R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file)
         logprob_substitution_at_t = R_mat * t
+        
+        # normalize if desired
+        logprob_substitution_at_t = R_mat_normFunc(logprob_substitution_at_t, 
+                                                   equl_vecs)
         
         return logprob_substitution_at_t
     
@@ -131,7 +136,7 @@ class subst_base:
 ### mixture substitution model (using the LG rate class method)   #############
 ###############################################################################
 class LG_mixture:
-    def initialize_model(self, inputs_dict):
+    def initialize_model(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters and hyperparams
         JITTED: no
@@ -150,36 +155,45 @@ class LG_mixture:
             - k_subst
               > DEFAULT: length of mixture logits vector
         """
-        ### PARAMETER: gamma shape
-        gamma_shape = inputs_dict.get('gamma_shape', 1)
+        provided_args = dir(argparse_obj)
         
-        # has to be greater than zero
-        err_msg = ('Initial guess for GAMMA SHAPE must be greater than zero,'+
-                  f' but recieved gamma_shape={gamma_shape}')
-        assert gamma_shape > 0, err_msg
-        del err_msg
+        ### PARAMETER: gamma shape
+        # if not provided, set to 1
+        if 'gamma_shape' not in provided_args:
+            gamma_shape = 1
+            
+        # otherwise, read from argparse object and make sure the domain
+        #   restriction is satisfied
+        else:
+            gamma_shape = argparse_obj.gamma_shape
+            
+            # has to be greater than zero
+            err_msg = ('Initial guess for GAMMA SHAPE must be greater than zero,'+
+                      f' but recieved gamma_shape={gamma_shape}')
+            assert gamma_shape > 0, err_msg
+            del err_msg
         
         # for stochastic gradient descent, transform to (-inf, inf) domain
         gamma_shape_transf = jnp.sqrt(gamma_shape)
         
+        
         ### PARAMETER: mixture logits
         # if not provided, generate a logits vector of ones
-        if not inputs_dict.get('subst_mix_logits', None):
-            err_msg = ('SUBSTITUTION model underspecifed: If not manually '+
-                       'initializing subst_mix_logits, need to specify '+
-                       'how many SUBSTITUTION mixtures with k_subst=int')
-            assert inputs_dict.get('k_susbt'), err_msg
-            del err_msg
-            
-            subst_mix_logits = jnp.ones(inputs_dict['k_subst'])
+        if 'subst_mix_logits' not in provided_args:
+            subst_mix_logits = jnp.ones(argparse_obj.k_subst)
         
         # if provided, just use what's provided
         else:
-            subst_mix_logits = inputs_dict['subst_mix_logits']
+            subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits)
+        
         
         ### HYPERPARAMETER: k_subst
         # either provided already, or inferred from length of subst_mix_logits
-        k_subst = inputs_dict.get('k_subst', subst_mix_logits.shape[0])
+        if 'k_subst' not in provided_args:
+            k_subst = subst_mix_logits.shape[0]
+        else:
+            k_subst = argparse_obj.k_subst
+        
         
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
@@ -225,6 +239,10 @@ class LG_mixture:
         R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file, 
                                           gamma_shape, k_subst)
         logprob_substitution_at_t = R_mat * t
+        
+        # normalize if desired
+        logprob_substitution_at_t = R_mat_normFunc(logprob_substitution_at_t,
+                                                   equl_vecs)
         
         return logprob_substitution_at_t
     

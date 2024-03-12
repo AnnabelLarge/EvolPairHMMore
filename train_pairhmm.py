@@ -8,18 +8,30 @@ Created on Wed Jan 17 11:18:49 2024
 ABOUT:
 ======
 Load aligned pfams, optionally calculate emission and transition 
-  counts from pair alignments, and fit a simple GGI model
+  counts from pair alignments. Possibility of single or mixture models
+  over substitutions, equilibrium distributions, and indel models
 
 
 TODO:
 =====
+immediate:
+----------
+- parser that reads a logfile and a pickle, then returns GGI params in an
+  easy-to-read format?
+- eval script that loads model and runs evaluation on some dataset
+
+
+medium:
+-------
+- remove the option to calculate counts on the fly, and just make this a 
+  separate pre-processing script (I don't ever use it...)
+
+
 far future:
 -----------
 For now, using LG08 exchangeability matrix, but in the future, could use 
   CherryML to calculate a new rate matrix for my specific pfam dataset?
   https://github.com/songlab-cal/CherryML
-
-Implement automatic parameter initialization at some point?
 
 """
 import os
@@ -27,6 +39,7 @@ import pickle
 import pandas as pd
 pd.options.mode.chained_assignment = None # this is annoying
 import numpy as np
+import copy
 from tqdm import tqdm
 
 import jax
@@ -37,8 +50,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # custom imports
 from utils.setup_training_dir import setup_training_dir
-from GGI_funcs.rates_transition_matrices import lg_rate_mat
-from GGI_funcs.training_testing_fns import train_fn, eval_fn
+from utils.training_testing_fns import train_fn, eval_fn
 
 
 
@@ -50,17 +62,61 @@ def train_ggi(args):
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
     assert args.loadtype == 'eager'
-        
+    
+    
+    ### 0.1: DECIDE MODEL FROM CONFIG
+    # which substitution model; HAVE to have something here
+    if args.subst_model_type == 'subst_base':
+        from model_blocks.protein_subst_models import subst_base as subst_model
+    elif args.subst_model_type == 'LG_mixture':
+        from model_blocks.protein_subst_models import LG_mixture as subst_model
+    
+    # decide if you want to normalize the substitution matrix or not
+    if args.norm:
+        from model_blocks.subst_norm_funcs import norm_rate_matrix as R_mat_normFunc
+    elif not args.norm:
+        from model_blocks.subst_norm_funcs import identity as R_mat_normFunc
+    
+    # which equilibrium distribution; default is no_equl
+    if ('equl_model_type' not in dir(args)) or (args.equl_model_type == None):
+        from model_blocks.equl_distr_models import no_equl as equl_model
+        args.equl_model_type = 'no_equl'
+    elif args.equl_model_type == 'equl_base':
+        from model_blocks.equl_distr_models import equl_base as equl_model
+    elif args.equl_model_type == 'equl_dirichletMixture':
+        from model_blocks.equl_distr_models import equl_dirichletMixture as equl_model
+    elif args.equl_model_type == 'equl_mixture':
+        from model_blocks.equl_distr_models import equl_mixture as equl_model
+    
+    # which indel model; default is no indel model
+    if ('indel_model_type' not in dir(args)) or (args.indel_model_type == None):
+        from model_blocks.indel_models import no_indel as indel_model
+        args.indel_model_type = 'no_indel'
+    elif args.indel_model_type == 'GGI_single':
+        from model_blocks.indel_models import GGI_single as indel_model
+    elif args.indel_model_type == 'GGI_mixture':
+        from model_blocks.indel_models import GGI_mixture as indel_model
+    
+    # add this model info to the top of the logfile
+    logfile_msg = ('TRAINING PairHMM composed of:\n' +
+                   f'1.) substitution model: {args.subst_model_type} (norm: {args.norm})\n' +
+                   f'2.) equilibrium distribution: {args.equl_model_type}\n' +
+                   f'3.) indel model: {args.indel_model_type}\n')
+    
+    
+    ### 0.2: DECIDE TRAINING MODE
     # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
-        logfile_msg = 'Reading from precalculated counts matrices before training\n'
+        to_add = ('Reading from precalculated counts matrices before'+
+                  ' training\n\n')
         from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
         from onlyTrain.hmm_dataset import jax_collator as collator
         
-    # Use this training mode if you need to calculate emission and transition counts 
-    #   from pair alignments
+    # Use this training mode if you need to calculate emission and transition  
+    #   counts from pair alignments
     elif not args.have_precalculated_counts:
-        logfile_msg = 'Calculating counts matrices from alignments, then training\n'
+        to_add = ('Calculating counts matrices from alignments, then'+
+                  ' training\n\n')
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
         from calcCounts_Train.summarize_alignment import summarize_alignment
@@ -84,6 +140,9 @@ def train_ggi(args):
             else:
                 return global_max_seqlen
         
+    logfile_msg = logfile_msg + to_add
+    del to_add
+    
         
     ##############
     ### 1: SETUP #
@@ -100,7 +159,7 @@ def train_ggi(args):
     rngkey = jax.random.key(args.rng_seednum)
     
     # create a new logfile to record training loss in an ascii file
-    # can inspect this faster than a tensorboard thing
+    # can eyeball this faster than a tensorboard thing
     with open(args.logfile_name,'w') as g:
         g.write(logfile_msg)
         g.write('TRAINING PROG:\n')
@@ -131,50 +190,62 @@ def train_ggi(args):
     test_global_max_seqlen = test_dset.max_seqlen()
     
     
-    ### 1.3: using the equilibrium distribution from the TRAINING SET, get a
-    ###      rate matrix; {rate}_ij = {exchange_mat}_ij * pi_i where i != j
-    # load this dataset's equilibrium distribution
-    equl_pi_mat = training_dset.retrieve_equil_dist()
-    equl_pi_mat = jnp.array(equl_pi_mat)
-    
-    # get the R matrix
-    subst_rate_mat = lg_rate_mat(equl_pi_mat,
-                                 f'./{args.data_dir}/LG08_exchangeability_r.npy')
-    
-    # normalize the R matrix by the equilibrium vector, if desired
-    if args.norm:
-        R_times_pi = -np.diagonal(subst_rate_mat) @ equl_pi_mat
-        subst_rate_mat = subst_rate_mat / R_times_pi
-    
-    
-    ### 1.4: quantize time in geometric spacing, just like in cherryML
+    ### 1.3: quantize time in geometric spacing, just like in cherryML
     quantization_grid = range(-args.t_grid_num_steps, 
                               args.t_grid_num_steps + 1, 
                               1)
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
     
+    ###########################
+    ### 2: INITIALIZE MODEL   #
+    ###########################
+    # subst_model, equl_model, indel_model, R_mat_normFunc
+    ### 2.1: initialize the equlibrium distribution(s)
+    equl_model_params, equl_model_hparams = equl_model.initialize_params(args)
+    
+    # if this is the base model, use the equilibrium distribution
+    #   from TRAINING data
+    if args.equl_model_type == 'equl_base':
+        equl_model_hparams['equl_vecs_fromData'] = training_dset.retrieve_equil_dist()
+    
+    
+    ### 2.2: initialize the substitution model
+    subst_model_params, subst_model_hparams = subst_model.initialize_params(args)
+    
+    # add R_mat_normFunc to hyperparameters
+    subst_model_hparams['R_mat_normFunc'] = R_mat_normFunc
+    
+    
+    ### 2.3: initialize the indel model
+    indel_model_params, indel_model_hparams = indel_model.initialize_params(args)
+    
+    
+    ### 2.4: combine all initialized models above
+    # combine all parameters to be passed to optax 
+    params = {**equl_model_params, **subst_model_params, **indel_model_params}
+    
+    # combine all hyperparameters to be passed to training function 
+    hparams = {**equl_model_hparams, **subst_model_hparams, **indel_model_hparams}
+    
+    # if it hasn't already been specified in the JSON file, set the gap_tok
+    #   to default value of 63; this is only used for calculating counts
+    if 'gap_tok' not in dir(args):
+        hparams['gap_tok'] = 63
+    else:
+        haprams['gap_tok'] = args.gap_tok
+    
+    # combine models under one pairHMM
+    pairHMM = (equl_model, subst_model, indel_model)
+    
     
     ########################
-    ### 2: TRAINING LOOP   #
+    ### 3: TRAINING LOOP   #
     ########################
-    ### 2.1: transform the initial indel params from the config file to lie on 
-    ### domain (-inf, inf)
-    lam_transf = jnp.sqrt(args.lam)
-    mu_transf = jnp.sqrt(args.mu)
-    x_transf = jnp.sqrt(-jnp.log(args.x))
-    y_transf = jnp.sqrt(-jnp.log(args.y))
-    indel_params_transformed = jnp.array([lam_transf, mu_transf, x_transf, y_transf])
-    
-    # replace any zero arguments with smallest_float32
-    smallest_float32 = jnp.finfo('float32').smallest_normal
-    indel_params_transformed = jnp.where(indel_params_transformed == 0, 
-                                         smallest_float32, 
-                                         indel_params_transformed)
-    
+    ### 3.1: SETUP FOR TRAINING LOOP
     # initialize optax
     tx = optax.adam(args.learning_rate)
-    opt_state = tx.init(indel_params_transformed)
+    opt_state = tx.init(params)
     
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
@@ -197,9 +268,12 @@ def train_ggi(args):
         #   eval set log likelihoods
         record_results = False
         
-        ### 2.2: training phase
+        ### 3.2: TRAINING PHASE
         epoch_train_loss = 0
         for batch_idx, batch in enumerate(training_dl):
+            # fold in epoch_idx and batch_idx for training
+            rngkey_for_training = jax.random.fold_in(rngkey, epoch_idx+batch_idx)
+            
             # if you DON'T have precalculated counts matrices, will need to 
             #   clip the batch inputs
             if not args.have_precalculated_counts:
@@ -207,8 +281,8 @@ def train_ggi(args):
                                                      global_max_seqlen = training_global_max_seqlen)
                 allCounts = summarize_alignment(batch, 
                                                 max_seq_len = batch_max_seqlen, 
-                                                alphabet_size=20, 
-                                                gap_tok=63)
+                                                alphabet_size=hparams['alphabet_size'], 
+                                                gap_tok=hparams['gap_tok'])
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -218,49 +292,23 @@ def train_ggi(args):
             # take a step using minibatch gradient descent
             out = train_fn_jitted(all_counts = allCounts, 
                                   t_arr = t_array, 
-                                  subst_rate_mat = subst_rate_mat, 
-                                  equl_pi_mat = equl_pi_mat,
-                                  indel_params_transformed = indel_params_transformed, 
-                                  diffrax_params = args.diffrax_params, 
-                                  alphabet_size=20)
-            batch_train_loss, indel_param_grads = out
+                                  pairHMM = pairHMM, 
+                                  params_dict = params, 
+                                  hparams_dict = hparams,
+                                  training_rngkey = rngkey_for_training)
+            batch_train_loss, param_grads = out
             del out
             
-            # update the parameters with optax
-            updates, opt_state = tx.update(indel_param_grads, opt_state)
-            indel_params_transformed = optax.apply_updates(indel_params_transformed, 
-                                                           updates)
+            # update the parameters dictionary with optax
+            updates, opt_state = tx.update(param_grads, opt_state)
+            params = optax.apply_updates(params, updates)
             
-            
-            # monitor how params change over batches of training
-            idx_for_tboard = (batch_idx) + (epoch_idx) * len(training_dl)
-            lam_transf, mu_transf, x_transf, y_transf = indel_params_transformed
-            lam_tosave = np.array(jnp.square(lam_transf))
-            mu_tosave = np.array(jnp.square(mu_transf))
-            x_tosave = np.array(jnp.exp(-jnp.square(x_transf)))
-            y_tosave = np.array(jnp.exp(-jnp.square(y_transf)))
-            writer.add_scalar('Params/lambda (indel param)', lam_tosave, idx_for_tboard)
-            writer.add_scalar('Params/mu (indel param)', mu_tosave, idx_for_tboard)
-            writer.add_scalar('Params/x (indel param)', x_tosave, idx_for_tboard)
-            writer.add_scalar('Params/y (indel param)', y_tosave, idx_for_tboard)
-            del lam_transf, mu_transf, x_transf, y_transf
-            del lam_tosave, mu_tosave, x_tosave, y_tosave
-
-
-#            # monitor how gradients update over batches of training
-#            writer.add_scalar('Grads/d(lambda)', np.array(indel_param_grads[0]), idx_for_tboard)
-#            writer.add_scalar('Grads/d(mu)', np.array(indel_param_grads[1]), idx_for_tboard)
-#            writer.add_scalar('Grads/d(x)', np.array(indel_param_grads[2]), idx_for_tboard)
-#            writer.add_scalar('Grads/d(y)', np.array(indel_param_grads[3]), idx_for_tboard)
-            del batch_idx, idx_for_tboard
-
-    
             # add to total loss for this epoch
             epoch_train_loss += batch_train_loss
             del batch_train_loss
         
         
-        ### 2.3: get the average epoch_train_loss; record
+        ### 3.3: GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD
         ave_epoch_train_loss = float(epoch_train_loss/len(training_dl))
         writer.add_scalar('Loss/training set', ave_epoch_train_loss, epoch_idx)
 
@@ -275,29 +323,24 @@ def train_ggi(args):
         del batch, allCounts, epoch_train_loss
 
 
-        ### 2.4: if the train loss is better than last epoch, save the 
-        ###   parameters to a dictionary
+        ### 3.4: IF THE TRAINING LOSS IS BETTER, SAVE MODEL WITH PARAMETERS
         if ave_epoch_train_loss < best_train_loss:
             # swap the flag
             record_results = True
             
-            # unpack; undo the transformation
-            lam_transf, mu_transf, x_transf, y_transf = indel_params_transformed
-            lam_tosave = jnp.square(lam_transf)
-            mu_tosave = jnp.square(mu_transf)
-            x_tosave = jnp.exp(-jnp.square(x_transf))
-            y_tosave = jnp.exp(-jnp.square(y_transf))
+            # add model information to the hyperparameters dictionary and save
+            output_dict = copy.deepcopy(hparams)
+            output_dict['subst_model_type'] = args.subst_model_type
+            output_dict['equl_model_type'] = args.subst_model_type
+            output_dict['indel_model_type'] = args.subst_model_type
             
-            # build dictionary
-            indel_params = {'lam': lam_tosave,
-                            'mu': mu_tosave,
-                            'x': x_tosave,
-                            'y': y_tosave}
+            with open(f'{args.model_ckpts_dir}/modelInfo_hyperparams.pkl', 'wb') as g:
+                pickle.dump(output_dict, g)
+            del output_dict
             
-            # save dictionary to flat text file (could pickle it later...)
-            with open(f'{args.model_ckpts_dir}/indelparams.txt', 'w') as g:
-                for key, val in indel_params.items():
-                    g.write(f'{key}\t{val}\n')
+            # save the parameters dictionary
+            with open(f'{args.model_ckpts_dir}/params.pkl', 'wb') as g:
+                pickle.dump(params, g)
             
             # record to log file
             with open(args.logfile_name,'a') as g:
@@ -307,12 +350,14 @@ def train_ggi(args):
             best_train_loss = ave_epoch_train_loss
     
         
-        ### 2.5: also check current performance on held-out test set, and write
-        ###      this to the tensorboard
-        # only comes into play if you want to record the results i.e. record_results=True
+        ### 3.5: CHECK PERFORMANCE ON HELD-OUT TEST SET
         eval_df_lst = []
         epoch_test_loss = 0
         for batch in test_dl:
+            # fold in epoch_idx and batch_idx for eval (use negative value, 
+            #   to have distinctly different random keys from training)
+            rngkey_for_eval = jax.random.fold_in(rngkey, -(epoch_idx+batch_idx))
+            
             # if you DON'T have precalculated counts matrices, will need to 
             #   clip the batch inputs
             if not args.have_precalculated_counts:
@@ -320,8 +365,8 @@ def train_ggi(args):
                                                      global_max_seqlen = test_global_max_seqlen)
                 allCounts = summarize_alignment(batch, 
                                                 max_seq_len = batch_max_seqlen, 
-                                                alphabet_size=20, 
-                                                gap_tok=63)
+                                                alphabet_size=hparams['alphabet_size'], 
+                                                gap_tok=hparams['gap_tok'])
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -331,11 +376,11 @@ def train_ggi(args):
             # evaluate batch loss
             out = eval_fn_jitted(all_counts = allCounts, 
                                  t_arr = t_array, 
-                                 subst_rate_mat = subst_rate_mat, 
-                                 equl_pi_mat = equl_pi_mat,
-                                 indel_params_transformed = indel_params_transformed,
-                                 diffrax_params = args.diffrax_params, 
-                                 alphabet_size=20)
+                                 pairHMM = pairHMM, 
+                                 params_dict = params, 
+                                 hparams_dict = hparams,
+                                 training_rngkey = rngkey_for_eval)
+            
             batch_test_loss, logprob_per_sample = out
             del out
             
@@ -367,15 +412,13 @@ def train_ggi(args):
         if record_results:
             eval_df = pd.concat(eval_df_lst)
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
-                g.write(f'#Logprobs using GGI indel params from epoch{epoch_idx}\n')
+                g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
 
 
-
-
-        ### 2.6: EARLY STOPPING
-        ### if test loss increases for X epochs in a row, stop training; reset
-        ###    counter if the loss decreases again (this is from Ian)
+        ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
+        ###      stop training; reset counter if the loss decreases again 
+        ###      (this is directly from Ian)
         if (jnp.allclose (prev_test_loss, 
                           jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
                           rtol=1e-05) ):
@@ -414,7 +457,7 @@ if __name__ == '__main__':
     del err_ms
     
     # INITIALIZE PARSER
-    parser = argparse.ArgumentParser(prog='GGI')
+    parser = argparse.ArgumentParser(prog='train_pairhmm')
     
     # config files required to run
     parser.add_argument('--config-file',

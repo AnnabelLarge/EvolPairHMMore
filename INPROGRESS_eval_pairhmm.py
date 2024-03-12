@@ -14,6 +14,11 @@ Load aligned pfams (and optionally calculate emission and transition
 
 TODO:
 =====
+medium:
+-------
+- remove the option to calculate counts on the fly, and just make this a 
+  separate pre-processing script (I don't ever use it...)
+
 
 far future:
 -----------

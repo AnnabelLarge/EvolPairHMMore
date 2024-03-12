@@ -19,10 +19,14 @@ Methods to generate equilibrium distributions:
 3. equl_mixture
    > mixture model, manually provide equilibrium distributions to test
 
+4. no_equl
+   > placeholder so that training script will run, but emissions/omissions
+     will not be scored
+
 
 shared class methods:
 =====================
-1. initialize_model(self, inputs_dict): initialize all parameters and 
+1. initialize_model(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
 
@@ -53,7 +57,7 @@ smallest_float32 = jnp.finfo('float32').smallest_normal
 ### single equlibrium vector: infer from given data   #########################
 ###############################################################################
 class equl_base:
-    def initialize_params(self, inputs_dict):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -74,10 +78,13 @@ class equl_base:
         JITTED: yes
         WHEN IS THIS CALLED: every training loop iteration
         OUTPUTS: 
+            - equl_vec: equilibrium distribution seen in real data
+            - logprob_equl: logP(emission/omission)
         """
         # equilibrium distribution of amino acids, probably provided by 
         # the dataloader? make sure to give it an extra k_equl dimension
-        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs'], -1)
+        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
+        equl_vec = jnp.where(equl_vec!=0, equl_vec, smallest_float32)
         logprob_equl = jnp.log(equl_vec)
         
         return (equl_vec, logprob_equl)
@@ -88,7 +95,7 @@ class equl_base:
 ### mixture model: sample from a dirichlet distribution   #####################
 ###############################################################################
 class equl_dirichletMixture:
-    def initialize_params(self, inputs_dict):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -107,32 +114,20 @@ class equl_dirichletMixture:
             - k_equl
               > DEFAULT: length of equl_mix_logits
         """
+        provided_args = dir(argparse_obj)
+        
         ### PARAMETER: dirichlet_shape
         # if not provided, use a vector of equal probabilities
-        if not inputs_dict.get('dirichlet_shape', None):
-            # make sure certain params are already given
-            err_msg = ('DIRICHLET SHAPE VECTOR underspecifed: If not '+
-                       'manually initializing dirichlet_shape, need to '+
-                       'specify alphabet size with alphabet_size=int')
-            assert ('alphabet_size' in inputs_dict.keys()), err_msg
-            del err_msg
-            
-            err_msg = ('DIRICHLET SHAPE VECTOR underspecifed: If not '+
-                       'manually initializing dirichlet_shape, need to '+
-                       'specify how many DIRICHLET SHAPE VECTORS '+
-                       'with k_equl=int')
-            assert ('k_equl' in inputs_dict.keys()), err_msg
-            del err_msg
-            
+        if 'dirichlet_shape' not in provided_args:
             # generate dirichlet_shape
-            shapes = jnp.array(range(1, k_equl+1))
-            to_mult = jnp.ones((alphabet_size, k_equl))
+            shapes = jnp.array(range(1, argparse_obj.k_equl+1))
+            to_mult = jnp.ones((argparse_obj.alphabet_size, argparse_obj.k_equl))
             dirichlet_shape = jnp.einsum('ij,j->ij', to_mult, shapes)
             del shapes, to_mult
         
         # if provided, just use what's provided 
         else:
-            dirichlet_shape = inputs_dict['dirichlet_shape']
+            dirichlet_shape = jnp.array(argparse_obj.dirichlet_shape)
             
             # make sure domain restrictions are satisfied
             err_msg = ('Initial guesses for DIRICHLET SHAPE must be '+
@@ -144,27 +139,32 @@ class equl_dirichletMixture:
         # for stochastic gradient descent, transform to (-inf, inf) domain
         dirichlet_shape_transf = jnp.sqrt(dirichlet_shape)
             
+        
         ### PARAMETER: mixture logits
         # if not provided, generate a logits vector of ones
-        if not inputs_dict.get('equl_mix_logits', None):
-            # make sure certain params are already given
-            err_msg = ('EQUILIBRIUM distributions underspecifed: If not '+
-                       'manually initializing equl_mix_logits, need to '+
-                       'specify how many EQUILIBRIUM distributions '+
-                       'with k_equl=int')
-            assert ('k_equl' in inputs_dict.keys()), err_msg
-            del err_msg
-            
-            equl_mix_logits = jnp.ones(inputs_dict['k_equl'])
+        if 'equl_mix_logits' not in provided_args:
+            equl_mix_logits = jnp.ones(argparse_obj.k_equl)
         
         # if provided, just use what's provided
         else:
-            equl_mix_logits = inputs_dict['equl_mix_logits']
+            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
         
-        ### HYPERPARAMETERS: k_equl, alphabet_size
+        
+        ### HYPERPARAMETERS: alphabet_size
         # either provided already, or inferred from current inputs
-        alphabet_size = inputs_dict.get('alphabet_size', dirichlet_shape.shape[0])
-        k_equl = inputs_dict.get('k_equl', equl_mix_logits.shape[0])
+        if 'alphabet_size' not in provided_args:
+            alphabet_size = dirichlet_shape.shape[0]
+        else:
+            alphabet_size = argparse_obj.alphabet_size
+        
+        
+        ### HYPERPARAMETERS: k_equl
+        # either provided already, or inferred from current inputs
+        if 'k_equl' not in provided_args:
+            k_equl = equl_mix_logits.shape[0]
+        else:
+            k_equl = argparse_obj.k_equl
+        
         
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
@@ -186,6 +186,9 @@ class equl_dirichletMixture:
         JITTED: yes
         WHEN IS THIS CALLED: every training loop iteration
         OUTPUTS: 
+            - equl_vec: equilibrium distributions sampled from 
+                        dirichlet distribution
+            - logprob_equl: logP(emission/omission)
             
         note: make sure rngkey you provide has already been folded_in with
               the epoch idx outside of calling this function
@@ -265,7 +268,7 @@ class equl_dirichletMixture:
 ### mixture model: manually provide equilibrium distributions to test   #######
 ###############################################################################
 class equl_mixture:
-    def initialize_params(self, inputs_dict):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -277,25 +280,25 @@ class equl_mixture:
         hparams to pass on (or infer): 
             - k_equl (DEFAULT: length of equl_mix_logits)
         """
+        provided_args = dir(argparse_obj)
+        
         ### PARAMETER: mixture logits
         # if not provided, generate a logits vector of ones
-        if not inputs_dict.get('equl_mix_logits', None):
-            err_msg = ('EQUILIBRIUM distributions underspecifed: If not '+
-                       'manually initializing equl_mix_logits, need to '+
-                       'specify how many EQUILIBRIUM distributions '+
-                       'with k_equl=int')
-            assert inputs_dict.get('k_equl'), err_msg
-            del err_msg
-            
-            equl_mix_logits = jnp.ones(inputs_dict['k_equl'])
+        if 'equl_mix_logits' not in provided_args:
+            equl_mix_logits = jnp.ones(argparse_obj.k_equl)
         
         # if provided, just use what's provided
         else:
-            equl_mix_logits = inputs_dict['equl_mix_logits']
+            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
         
-        ### HYPERPARAMETER: k_equl
-        # either provided already, or inferred from length of subst_mix_logits
-        k_equl = inputs_dict.get('k_equl', equl_mix_logits.shape[0])
+        
+        ### HYPERPARAMETERS: k_equl
+        # either provided already, or inferred from current inputs
+        if 'k_equl' not in provided_args:
+            k_equl = equl_mix_logits.shape[0]
+        else:
+            k_equl = argparse_obj.k_equl
+        
         
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
@@ -315,9 +318,49 @@ class equl_mixture:
         JITTED: yes
         WHEN IS THIS CALLED: every training loop iteration
         OUTPUTS: 
+            - equl_vec: equilibrium distributions manually passed in
+            - logprob_equl: logP(emission/omission)
         """
         # equilibrium distribution of amino acids
         equl_vec = hparams_dict['equl_vecs']
+        equl_vec = jnp.where(equl_vec!=0, equl_vec, smallest_float32)
         logprob_equl = jnp.log(equl_vec)
         return (equl_vec, logprob_equl) 
+    
+
+
+###############################################################################
+### no equl dist (placeholder class)   ########################################
+###############################################################################
+# use this to train without scoring emissions from insertion sites or omissions 
+#   from deletion sites; these counts will be multiplied by zero and not 
+#   contribute to loss/logprob
+class no_equl:
+    def initialize_model(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit: None
+        hparams to pass on (or infer): None
+        """
+        return dict(), dict()
+        
+        
+    def equlVec_logprobs(self, params_dict, hparams_dict):
+        """
+        ABOUT: only return the equilibrium distribution seen from real data 
+               (this is usually needed for substitution model)
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration
+        OUTPUTS: 
+            - equl_vec: equilibrium distribution seen in real data
+            - empty_vec: placeholder vector for logP(emission/omission)=0
+        """
+        # equilibrium distribution of amino acids, probably provided by 
+        # the dataloader? make sure to give it an extra k_equl=1 dimension
+        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
+        return (equl_vec, jnp.zeros(equl_vec.shape))
     
