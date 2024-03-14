@@ -65,37 +65,53 @@ def train_ggi(args):
     
     
     ### 0.1: DECIDE MODEL FROM CONFIG
-    # which substitution model; HAVE to have something here
-    if args.subst_model_type == 'subst_base':
-        from model_blocks.protein_subst_models import subst_base as subst_model
-    elif args.subst_model_type == 'LG_mixture':
-        from model_blocks.protein_subst_models import LG_mixture as subst_model
-    
     # decide if you want to normalize the substitution matrix or not
     if args.norm:
-        from model_blocks.subst_norm_funcs import norm_rate_matrix as R_mat_normFunc
+        from model_blocks.subst_norm_functions import norm_rate_matrix as R_mat_normFunc
+        
     elif not args.norm:
-        from model_blocks.subst_norm_funcs import identity as R_mat_normFunc
+        from model_blocks.subst_norm_functions import identity as R_mat_normFunc
+    
+    # which substitution model; HAVE to have something here
+    if args.subst_model_type == 'subst_base':
+        from model_blocks.protein_subst_models import subst_base
+        subst_model = subst_base()
+        
+    elif args.subst_model_type == 'LG_mixture':
+        from model_blocks.protein_subst_models import LG_mixture 
+        subst_model = LG_mixture()
     
     # which equilibrium distribution; default is no_equl
     if ('equl_model_type' not in dir(args)) or (args.equl_model_type == None):
-        from model_blocks.equl_distr_models import no_equl as equl_model
+        from model_blocks.equl_distr_models import no_equl
+        equl_model = no_equl()
         args.equl_model_type = 'no_equl'
+    
     elif args.equl_model_type == 'equl_base':
-        from model_blocks.equl_distr_models import equl_base as equl_model
+        from model_blocks.equl_distr_models import equl_base
+        equl_model = equl_base()
+    
     elif args.equl_model_type == 'equl_dirichletMixture':
-        from model_blocks.equl_distr_models import equl_dirichletMixture as equl_model
+        from model_blocks.equl_distr_models import equl_dirichletMixture 
+        equl_model = equl_dirichletMixture()
+    
     elif args.equl_model_type == 'equl_mixture':
-        from model_blocks.equl_distr_models import equl_mixture as equl_model
+        from model_blocks.equl_distr_models import equl_mixture 
+        equl_model = equl_mixture()
     
     # which indel model; default is no indel model
     if ('indel_model_type' not in dir(args)) or (args.indel_model_type == None):
-        from model_blocks.indel_models import no_indel as indel_model
+        from model_blocks.indel_models import no_indel
+        indel_model = no_indel()
         args.indel_model_type = 'no_indel'
+    
     elif args.indel_model_type == 'GGI_single':
-        from model_blocks.indel_models import GGI_single as indel_model
+        from model_blocks.indel_models import GGI_single
+        indel_model = GGI_single()
+    
     elif args.indel_model_type == 'GGI_mixture':
-        from model_blocks.indel_models import GGI_mixture as indel_model
+        from model_blocks.indel_models import GGI_mixture
+        indel_model = GGI_mixture()
     
     # add this model info to the top of the logfile
     logfile_msg = ('TRAINING PairHMM composed of:\n' +
@@ -202,23 +218,24 @@ def train_ggi(args):
     ###########################
     # subst_model, equl_model, indel_model, R_mat_normFunc
     ### 2.1: initialize the equlibrium distribution(s)
-    equl_model_params, equl_model_hparams = equl_model.initialize_params(args)
+    equl_model_params, equl_model_hparams = equl_model.initialize_params(argparse_obj=args)
     
-    # if this is the base model, use the equilibrium distribution
-    #   from TRAINING data
-    if args.equl_model_type == 'equl_base':
+    # if this is the base model or the placeholder, use the equilibrium 
+    #   distribution from TRAINING data
+    if args.equl_model_type in ['equl_base', 'no_equl']:
         equl_model_hparams['equl_vecs_fromData'] = training_dset.retrieve_equil_dist()
     
     
     ### 2.2: initialize the substitution model
-    subst_model_params, subst_model_hparams = subst_model.initialize_params(args)
+    subst_model_params, subst_model_hparams = subst_model.initialize_params(argparse_obj=args)
     
-    # add R_mat_normFunc to hyperparameters
+    # add R_mat_normFunc and lg_exch_file to hyperparameters
+    subst_model_hparams['lg_exch_file'] = args.data_dir + '/' + args.lg_exch_file
     subst_model_hparams['R_mat_normFunc'] = R_mat_normFunc
     
     
     ### 2.3: initialize the indel model
-    indel_model_params, indel_model_hparams = indel_model.initialize_params(args)
+    indel_model_params, indel_model_hparams = indel_model.initialize_params(argparse_obj=args)
     
     
     ### 2.4: combine all initialized models above
@@ -233,7 +250,7 @@ def train_ggi(args):
     if 'gap_tok' not in dir(args):
         hparams['gap_tok'] = 63
     else:
-        haprams['gap_tok'] = args.gap_tok
+        hparams['gap_tok'] = args.gap_tok
     
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
@@ -290,7 +307,8 @@ def train_ggi(args):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
-            out = train_fn_jitted(all_counts = allCounts, 
+            # DEBUG: using the un-jitted version of this!!!
+            out = train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
                                   params_dict = params, 
@@ -329,18 +347,38 @@ def train_ggi(args):
             record_results = True
             
             # add model information to the hyperparameters dictionary and save
+            #   to a pickle object
             output_dict = copy.deepcopy(hparams)
+            del output_dict['R_mat_normFunc']
+            del output_dict['equl_vecs']
+            
+            if 'dirichlet_samp_key' in output_dict.keys():
+                del output_dict['dirichlet_samp_key']
+            
+            if 'equl_vecs_fromData' in output_dict.keys():
+                del output_dict['equl_vecs_fromData'] 
+            
             output_dict['subst_model_type'] = args.subst_model_type
             output_dict['equl_model_type'] = args.subst_model_type
             output_dict['indel_model_type'] = args.subst_model_type
+            output_dict['epoch_of_training'] = epoch_idx
             
-            with open(f'{args.model_ckpts_dir}/modelInfo_hyperparams.pkl', 'wb') as g:
-                pickle.dump(output_dict, g)
+            with open(f'{args.model_ckpts_dir}/modelInfo_hyperparams.json', 'w') as g:
+                json.dump(output_dict, g, indent="\t", sort_keys=True)
             del output_dict
             
             # save the parameters dictionary
-            with open(f'{args.model_ckpts_dir}/params.pkl', 'wb') as g:
-                pickle.dump(params, g)
+            output_dict = copy.deepcopy(params)
+            
+            for key, val in output_dict.items():
+                if val.size == 1:
+                    output_dict[key] = val.item()
+                else:
+                    output_dict[key] = val.tolist()
+            
+            with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
+                json.dump(output_dict, g, indent="\t", sort_keys=True)
+            del output_dict
             
             # record to log file
             with open(args.logfile_name,'a') as g:
@@ -374,12 +412,13 @@ def train_ggi(args):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # evaluate batch loss
-            out = eval_fn_jitted(all_counts = allCounts, 
+            # DEBUG: using the un-jitted version of this!!!
+            out = eval_fn(all_counts = allCounts, 
                                  t_arr = t_array, 
                                  pairHMM = pairHMM, 
                                  params_dict = params, 
                                  hparams_dict = hparams,
-                                 training_rngkey = rngkey_for_eval)
+                                 eval_rngkey = rngkey_for_eval)
             
             batch_test_loss, logprob_per_sample = out
             del out
@@ -459,14 +498,16 @@ if __name__ == '__main__':
     # INITIALIZE PARSER
     parser = argparse.ArgumentParser(prog='train_pairhmm')
     
-    # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # # config files required to run
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
     # parse the arguments
     args = parser.parse_args()
+    
+    args.config_file = 'CONFIG1_TEST.json'
     
     with open(args.config_file, 'r') as f:
         t_args = argparse.Namespace()

@@ -42,7 +42,7 @@ universal order of dimensions:
 
 """
 import jax
-from jax import jnp
+from jax import numpy as jnp
 from jax.nn import log_softmax
 
 # We replace zeroes and infinities with small numbers sometimes
@@ -57,8 +57,9 @@ def logsumexp_withZeros(x, axis):
     exp_vec = jnp.exp(x)
     exp_vec_masked = jnp.where(exp_vec != 1, exp_vec, 0)
     sum_exp_vec = jnp.sum(exp_vec_masked, axis=axis)
-    out = jnp.log(sum_exp_vec)
-    return jnp.where(out != 0, out, 0)
+    return jnp.where(sum_exp_vec != 0,
+                     jnp.log(sum_exp_vec),
+                     0)
 
 
 def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
@@ -157,10 +158,9 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         ### vmap over the time array; return log probabilities PER TIME POINT,
         ###   and PER MIXTURE MODEL
-        vmapped_apply_model_at_time_t = jax.vmap(apply_model_at_time_t)
-        tuple_logprobs_perTime_perMix = vmapped_apply_model_at_time_t(t_arr)
+        vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
+        tuple_logprobs_perTime_perMix = vmapped_apply_model_at_t(t_arr)
         num_timepoints = len(t_arr)
-        
         
         ### unpack tuples; all times will be placed at dim0
         # (time, batch, k_subst, k_equl)
@@ -231,7 +231,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
         
         # deletions
-        with_dels_mix_weights = dels_logprobs_perMix + equl_mix_logprobs
+        with_dels_mix_weights = del_logprobs_perMix + equl_mix_logprobs
         logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
         
         
@@ -349,8 +349,8 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     ### vmap over the time array; return log probabilities PER TIME POINT,
     ###   and PER MIXTURE MODEL
-    vmapped_apply_model_at_time_t = jax.vmap(apply_model_at_time_t)
-    tuple_logprobs_perTime_perMix = vmapped_apply_model_at_time_t(t_arr)
+    vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
+    tuple_logprobs_perTime_perMix = vmapped_apply_model_at_t(t_arr)
     num_timepoints = len(t_arr)
     
     
@@ -389,13 +389,13 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ### 2.2: log-softmax the mixture logits (if available)
     # get mixture logits from hparams OR pass in a dummy vector of 1
     # (k_subst,)
-    subst_mix_logits = params_toTrack.get('susbt_mix_logits', jnp.array([1]))
+    subst_mix_logits = params_dict.get('susbt_mix_logits', jnp.array([1]))
     
     # (k_equl,)
-    equl_mix_logits = params_toTrack.get('equl_mix_logits', jnp.array([1]))
+    equl_mix_logits = params_dict.get('equl_mix_logits', jnp.array([1]))
     
     # (k_indel,)
-    indel_mix_logits = params_toTrack.get('indel_mix_logits', jnp.array([1]))
+    indel_mix_logits = params_dict.get('indel_mix_logits', jnp.array([1]))
     
     # log-softmax these (if its a dummy vector, then this will be zero)
     subst_mix_logprobs = log_softmax(subst_mix_logits)
@@ -423,7 +423,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
     
     # deletions
-    with_dels_mix_weights = dels_logprobs_perMix + equl_mix_logprobs
+    with_dels_mix_weights = del_logprobs_perMix + equl_mix_logprobs
     logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
     
     
@@ -438,11 +438,10 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ##############################################
     # isolate different terms of the loss
     total_logprobs_persamp = logP_subs + logP_ins + logP_dels + logP_trans
-    logprobs_persamp = jnp.concatenate([jnp.expand_dims(m, 1) for m in
-                                        [logP_subs, 
-                                         (logP_subs + logP_ins),
-                                         logP_trans,
-                                         alignment_logprob_persamp],
-                                        axis=1)
-                                        
+    logprobs_persamp = jnp.concatenate([jnp.expand_dims(logP_subs, 1),
+                                        jnp.expand_dims((logP_subs + logP_ins), 1),
+                                        jnp.expand_dims(logP_trans, 1),
+                                        jnp.expand_dims(total_logprobs_persamp, 1)],
+                                       axis=1)
+                                          
     return (loss, logprobs_persamp)

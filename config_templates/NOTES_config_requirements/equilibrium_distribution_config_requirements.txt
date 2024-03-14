@@ -1,0 +1,61 @@
+equl_base
+==========
+REQUIRED in config:
+--------------------
+none
+
+other config requirements to check:
+-----------------------------------
+none
+
+OPTIONAL in config:
+-------------------
+none
+
+
+equl_dirichletMixture
+======================
+REQUIRED in config:
+--------------------
+none
+
+other config requirements to check:
+-----------------------------------
+- NEED either dirichlet_shape or k_equl
+- NEED either equl_mix_logits or k_equl
+
+OPTIONAL in config:
+-------------------
+- equl_mix_logits
+- dirichlet_shape
+- k_equl
+
+
+equl_mixture
+============
+REQUIRED in config:
+--------------------
+
+other config requirements to check:
+-----------------------------------
+- NEED either equl_mix_logits or k_equl
+
+OPTIONAL in config:
+-------------------
+- k_equl
+- equl_mix_logits
+
+
+no_equl
+=======
+REQUIRED in config:
+--------------------
+none
+
+other config requirements to check:
+-----------------------------------
+none
+
+OPTIONAL in config:
+-------------------
+none

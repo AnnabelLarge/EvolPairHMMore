@@ -22,7 +22,7 @@ Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 
 shared class methods:
 =====================
-1. initialize_model(self, inputs_dict): initialize all parameters and 
+1. initialize_params(self, inputs_dict): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
@@ -40,12 +40,19 @@ universal order of dimensions:
 import jax
 from jax import numpy as jnp
 
+### will use the transitionMatrix function from Ian
+from model_blocks.GGI_funcs import transitionMatrix
+
+# We replace zeroes and infinities with small numbers sometimes
+# It's sinful but BOY DO I LOVE SIN
+smallest_float32 = jnp.finfo('float32').smallest_normal
+
 
 ###############################################################################
 ### single GGI indel model   ##################################################
 ###############################################################################
 class GGI_single:
-    def initialize_model(self, argparse_obj):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -72,7 +79,7 @@ class GGI_single:
         hparams to pass on (or infer): None
         """
         ### will use the transitionMatrix function from Ian
-        from GGI_funcs import transitionMatrix
+        from model_blocks.GGI_funcs import transitionMatrix
         
         provided_args = dir(argparse_obj)
         
@@ -115,7 +122,9 @@ class GGI_single:
                               'x_transf': x_transf,
                               'y_transf': y_transf}
         
-        return initialized_params, dict()
+        hparams = {'diffrax_params': argparse_obj.diffrax_params}
+        
+        return initialized_params, hparams
         
         
     def logprobs_at_t(self, t, params_dict, hparams_dict):
@@ -164,7 +173,7 @@ class GGI_single:
 ### mixture GGI indel model   #################################################
 ###############################################################################
 class GGI_mixture:
-    def initialize_model(self, inputs_dict):
+    def initialize_params(self, inputs_dict):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -196,9 +205,6 @@ class GGI_mixture:
               > DEFAULT: length of mixture logits vector
             
         """
-        ### will use the transitionMatrix function from Ian
-        from GGI_funcs import transitionMatrix
-        
         provided_args = dir(argparse_obj)
         
         ### PARAMETERS: ggi params
@@ -257,7 +263,8 @@ class GGI_mixture:
                               'indel_mix_logits': indel_mix_logits}
         
         # dictionary of hyperparameters
-        hparams = {'k_indel': k_indel}
+        hparams = {'k_indel': k_indel,
+                   'diffrax_params': argparse_obj.diffrax_params}
         
         return initialized_params, hparams
     
@@ -309,7 +316,7 @@ class GGI_mixture:
 # use this to train without an indel model; indel counts will be multiplied
 #   by zero and not contribute to loss/logprob
 class no_indel:
-    def initialize_model(self, argparse_obj):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no

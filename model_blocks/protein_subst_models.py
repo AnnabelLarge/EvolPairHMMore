@@ -20,7 +20,7 @@ Protein substitution models (i.e. the EMISSIONS from match states):
 
 shared class methods:
 =====================
-1. initialize_model(self, argparse_obj): initialize all parameters and 
+1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
@@ -52,7 +52,7 @@ from tensorflow_probability.substrates import jax as tfp
 ### single substitution model   ###############################################
 ###############################################################################
 class subst_base:
-    def initialize_model(self, argparse_obj):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -60,9 +60,10 @@ class subst_base:
         OUTPUTS: dictionary of initial parameters for optax (if any)
         
         params to fit: (none, return empty dictionary)
-        hparams to pass on (or infer): (none,return empty dictionary)
+        hparams to pass on (or infer): 
+            - alphabet_size
         """
-        return dict(), dict()
+        return dict(), {'alphabet_size': argparse_obj.alphabet_size}
     
     
     def logprobs_at_t(self, t, params_dict, hparams_dict):
@@ -79,15 +80,15 @@ class subst_base:
         lg_exch_file = hparams_dict['lg_exch_file']
         R_mat_normFunc = hparams_dict['R_mat_normFunc']
         
-        # calculate the log probabilities at time t
-        # log(exp(Rt)); (alph, alph, k_subst, k_equl)
+        # generate the rate matrix
         R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file)
-        logprob_substitution_at_t = R_mat * t
-        
+    
         # normalize if desired
-        logprob_substitution_at_t = R_mat_normFunc(logprob_substitution_at_t, 
-                                                   equl_vecs)
+        R_mat = R_mat_normFunc(R_mat, equl_vecs)
         
+        # multiply by time
+        # log(exp(Rt)); (alph, alph, k_subst=1, k_equl)
+        logprob_substitution_at_t = R_mat * t
         return logprob_substitution_at_t
     
     
@@ -111,7 +112,7 @@ class subst_base:
         ### create rate matrix
         # (alphabet_size, alphabet_size, 1, k_equl) (i,j,k,l)
         # fill in values for i != j 
-        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat, equl_vecs)
+        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat_perClass, equl_vecs)
         
         # mask out only (i,j) diagonals
         mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
@@ -136,7 +137,7 @@ class subst_base:
 ### mixture substitution model (using the LG rate class method)   #############
 ###############################################################################
 class LG_mixture:
-    def initialize_model(self, argparse_obj):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters and hyperparams
         JITTED: no
@@ -154,6 +155,7 @@ class LG_mixture:
         hparams to pass on (or infer):
             - k_subst
               > DEFAULT: length of mixture logits vector
+            - alphabet_size
         """
         provided_args = dir(argparse_obj)
         
@@ -201,7 +203,8 @@ class LG_mixture:
                               'subst_mix_logits': subst_mix_logits}
         
         # dictionary of hyperparameters
-        hparams = {'k_subst': k_subst}
+        hparams = {'k_subst': k_subst,
+                   'alphabet_size': args.alphabet_size}
         
         return initialized_params, hparams
     
@@ -235,15 +238,15 @@ class LG_mixture:
         gamma_shape = jnp.square(gamma_shape_transf)
         
         
-        ### calculate the log probabilities at time t: log(exp(Rt))
-        R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file, 
-                                          gamma_shape, k_subst)
-        logprob_substitution_at_t = R_mat * t
+        # generate the rate matrix
+        R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file)
         
         # normalize if desired
-        logprob_substitution_at_t = R_mat_normFunc(logprob_substitution_at_t,
-                                                   equl_vecs)
+        R_mat = R_mat_normFunc(R_mat, equl_vecs)
         
+        # multiply by time
+        # log(exp(Rt)); (alph, alph, k_subst, k_equl)
+        logprob_substitution_at_t = R_mat * t
         return logprob_substitution_at_t
     
     

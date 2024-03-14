@@ -1,0 +1,40 @@
+Training configs MUST have:
+===========================
+general run params:
+-------------------
+- training_wkdir (str)
+- runname (str)
+- rng_seednum (int)
+
+dataset params:
+---------------
+- have_precalculated_counts (bool)
+- args.loadtype = 'eager' (str)
+- data_dir (str)
+- train_dset_splits (str)
+- test_dset_splits (str)
+- batch_size (int)
+
+training params:
+----------------
+- num_epochs (int)
+- learning_rate (float)
+- patience (int)
+
+pairHMM model params:
+---------------------
+- t_grid_center (float)
+- t_grid_step (float)
+- t_grid_num_steps (int)
+- subst_model_type (str)
+- norm (bool)
+
+
+Training configs can OPTIONALLY have:
+=====================================
+- equl_model_type (str)
+  > DEFAULT: don't score emissions from insert states/omissions from delete states
+- indel_model_type (str)
+  > DEFAULT: don't score transitions
+- gap_tok
+  > DEFAULT: 63

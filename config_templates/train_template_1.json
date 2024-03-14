@@ -14,17 +14,22 @@
 	"learning_rate": 0.01,
 	"patience": 500,
 
-	"model_type": "GGI_simple",
 	"t_grid_center": 0.1,
 	"t_grid_step": 1.1,
 	"t_grid_num_steps": 20,
-	"norm": false,
 
+	"subst_model_type": "subst_base",
+	"norm": false,
+	"lg_exch_file": "LG08_exchangeability_r.npy",
+	"alphabet_size": 20,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": "GGI_single",
 	"lam": 0.9,
 	"mu": 0.9,
 	"x": 0.1,
 	"y": 0.1,
-
 	"diffrax_params": {
 		"step": null,
 		"rtol": 1e-3,

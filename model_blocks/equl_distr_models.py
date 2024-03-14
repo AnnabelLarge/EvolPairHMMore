@@ -26,7 +26,7 @@ Methods to generate equilibrium distributions:
 
 shared class methods:
 =====================
-1. initialize_model(self, argparse_obj): initialize all parameters and 
+1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
 
@@ -148,15 +148,7 @@ class equl_dirichletMixture:
         # if provided, just use what's provided
         else:
             equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
-        
-        
-        ### HYPERPARAMETERS: alphabet_size
-        # either provided already, or inferred from current inputs
-        if 'alphabet_size' not in provided_args:
-            alphabet_size = dirichlet_shape.shape[0]
-        else:
-            alphabet_size = argparse_obj.alphabet_size
-        
+
         
         ### HYPERPARAMETERS: k_equl
         # either provided already, or inferred from current inputs
@@ -164,7 +156,7 @@ class equl_dirichletMixture:
             k_equl = equl_mix_logits.shape[0]
         else:
             k_equl = argparse_obj.k_equl
-        
+            
         
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
@@ -172,8 +164,7 @@ class equl_dirichletMixture:
                               'dirichlet_shape_transf':dirichlet_shape_transf}
         
         # dictionary of hyperparameters
-        hparams = {'k_equl': k_equl,
-                   'alphabet_size': alphabet_size}
+        hparams = {'k_equl': k_equl}
         
         return initialized_params, hparams
     
@@ -336,7 +327,7 @@ class equl_mixture:
 #   from deletion sites; these counts will be multiplied by zero and not 
 #   contribute to loss/logprob
 class no_equl:
-    def initialize_model(self, argparse_obj):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no

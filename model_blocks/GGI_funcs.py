@@ -84,7 +84,7 @@ def smallTimeTransitionMatrix (t, indelParams, /, **kwargs):
      [u*L/one_minus_L,       1-(b+q*(1-M)/M)*L/one_minus_L, (b+q*(1-M)/M-u)*L/one_minus_L],
      [(1-a-u)*M/one_minus_M, q,                             1-q-(1-a-u)*M/one_minus_M]])
     """
-    lam_arr,mu_arr,x_arr,y_arr = indelParams
+    lam,mu,x,y = indelParams
     step = kwargs.get('step', None)
     rtol = kwargs.get('rtol', None)
     atol = kwargs.get('atol', None)
