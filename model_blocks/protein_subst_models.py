@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -16,17 +17,24 @@ Protein substitution models (i.e. the EMISSIONS from match states):
      of a gamma distribution, which are multiplied by externally provided
      exchangeability matrix (I'm mostly replicating the LG paper, but
      NOT including zero-inflation param; I use the LG08 matrix)
+     > NOTE: this inherits a lot of its methods from subst_base 
 
 
-shared class methods:
-=====================
+at a minimum, future classes need:
+==================================
+0. something in class init to decide whether or not to normalize the 
+     rate matrix by the equilibrium distributions
+
 1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
 2. logprobs_at_t(self, t, params_dict, hparams_dict): calculate 
      logP(substitutions) at time t
-       
+
+3. norm_rate_matrix(self, subst_rate_mat, equl_pi_mat): normalizes the
+     rate matrix (as detailed above)
+
 
 universal order of dimensions:
 ==============================
@@ -52,6 +60,14 @@ from tensorflow_probability.substrates import jax as tfp
 ### single substitution model   ###############################################
 ###############################################################################
 class subst_base:
+    def __init__(self, norm):
+        """
+        just need this to give myself the option for normalizing the
+        rate matrix
+        """
+        self.norm = norm
+        
+        
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -62,8 +78,18 @@ class subst_base:
         params to fit: (none, return empty dictionary)
         hparams to pass on (or infer): 
             - alphabet_size
+            - exchangeabilities matrix
         """
-        return dict(), {'alphabet_size': argparse_obj.alphabet_size}
+        ### load LG exchangeabilities file
+        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.lg_exch_file}'
+        with open(file_to_load,'rb') as f:
+            exch_mat = jnp.load(f)
+        
+        ### hyperparams dict
+        hparams = {'alphabet_size': argparse_obj.alphabet_size,
+                   'exch_mat': exch_mat}
+        
+        return dict(), hparams
     
     
     def logprobs_at_t(self, t, params_dict, hparams_dict):
@@ -77,14 +103,14 @@ class subst_base:
         """
         # unpack extra hyperparameters
         equl_vecs = hparams_dict['equl_vecs']
-        lg_exch_file = hparams_dict['lg_exch_file']
-        R_mat_normFunc = hparams_dict['R_mat_normFunc']
+        exch_mat = hparams_dict['exch_mat']
         
         # generate the rate matrix
-        R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file)
+        R_mat = self.generate_rate_matrix(equl_vecs, exch_mat)
     
         # normalize if desired
-        R_mat = R_mat_normFunc(R_mat, equl_vecs)
+        if self.norm:
+            R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
         
         # multiply by time
         # log(exp(Rt)); (alph, alph, k_subst=1, k_equl)
@@ -92,22 +118,55 @@ class subst_base:
         return logprob_substitution_at_t
     
     
+    def norm_rate_matrix(self, subst_rate_mat, equl_pi_mat):
+        """
+        ABOUT: this normalizes the rate matrix by the equilibrium vectors, 
+               if self.norm is true
+        JITTED: yes
+        WHEN IS THIS CALLED: whenever logprobs_at_t is called, if self.norm 
+                             is true
+        OUTPUTS: normalized rate matrix
+        """
+        ### diag will be (k_subst, k_equl, alphabet_size) (i,j,k)
+        diag = jnp.diagonal(subst_rate_mat, axis1=0, axis2=1)
+        
+        ### equl_dists is (alphabet_size, k_equl) (k, j)
+        ###    output is (k_subst, k_equl) (i,j)
+        R_times_pi = -jnp.einsum('ijk, kj -> ij', diag, equl_pi_mat)
+        
+        ### divide each subst_rate_mat with this vec (thanks jnp broadcasting!)
+        # (alphabet_size, alphabet_size, k_subst, k_equl) / (k_subst, k_equl)
+        out = subst_rate_mat / R_times_pi
+        return out
+    
+    
+    ###  v__(these allow the class to be passed into a jitted function)__v  ###
+    def _tree_flatten(self):
+        children = ()
+        aux_data = {'norm': self.norm} 
+        return (children, aux_data)
+    
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        return cls(*children, **aux_data)
+    
+    
     ###############   v__(extra functions placed below)__v   ###############    
-    def generate_rate_matrix(self, equl_vecs, lg_exch_file):
+    def generate_rate_matrix(self, equl_vecs, exch_mat, **rate_class_kwargs):
         """
         ABOUT: calculating rate matrix R
         JITTED: yes
         WHEN IS THIS CALLED: whenever logprobs_at_t is called
         OUTPUTS: (alphabet_size, alphabet_size, 1, k_equl) tensor
         """
-        ### load LG exchangeabilities file
-        # (alphabet_size, alphabet_size) (i,j)
-        with open(lg_exch_file,'rb') as f:
-            exch_mat = jnp.load(f)
+        # these are just placeholders
+        gamma_shape = rate_class_kwargs.get('gamma_shape',-999)
+        k_subst = rate_class_kwargs.get('k_subst', -999)
         
         ### no rate classes, so just expand dimensions to make k_subst axis
         # (alphabet_size, alphabet_size, 1) (i,j,k)
-        exch_mat_perClass = jnp.expand_dims(exch_mat, axis=-1)
+        rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
+        exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
         
         ### create rate matrix
         # (alphabet_size, alphabet_size, 1, k_equl) (i,j,k,l)
@@ -130,13 +189,20 @@ class subst_base:
         subst_rate_mat = rate_mat_without_diags + diags_to_add
         
         return subst_rate_mat
+    
+    
+    def generate_rate_classes(self, gamma_shape, k_subst):
+        """
+        placeholder; no rate classes used for single model
+        """
+        return jnp.array([1])
 
 
 
 ###############################################################################
 ### mixture substitution model (using the LG rate class method)   #############
 ###############################################################################
-class LG_mixture:
+class LG_mixture(subst_base):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters and hyperparams
@@ -156,6 +222,7 @@ class LG_mixture:
             - k_subst
               > DEFAULT: length of mixture logits vector
             - alphabet_size
+            - exchangeability matrix
         """
         provided_args = dir(argparse_obj)
         
@@ -197,6 +264,12 @@ class LG_mixture:
             k_subst = argparse_obj.k_subst
         
         
+        ### load LG exchangeabilities file
+        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.lg_exch_file}'
+        with open(file_to_load,'rb') as f:
+            exch_mat = jnp.load(f)
+        
+        
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
         initialized_params = {'gamma_shape_transf': gamma_shape_transf,
@@ -204,7 +277,8 @@ class LG_mixture:
         
         # dictionary of hyperparameters
         hparams = {'k_subst': k_subst,
-                   'alphabet_size': args.alphabet_size}
+                   'alphabet_size': args.alphabet_size,
+                   'exch_mat': exch_mat}
         
         return initialized_params, hparams
     
@@ -224,7 +298,7 @@ class LG_mixture:
         ### unpack extra hyperparameters
         equl_vecs = hparams_dict['equl_vecs']
         k_subst = hparams_dict['k_subst']
-        lg_exch_file = hparams_dict['lg_exch_file']
+        exch_mat = hparams_dict['exch_mat']
         
         ### turn gamma_shape_transf into gamma_shape
         # make sure the gamma_shape_transf is not zero by shifting it to
@@ -239,10 +313,12 @@ class LG_mixture:
         
         
         # generate the rate matrix
-        R_mat = self.generate_rate_matrix(equl_vecs, lg_exch_file)
+        R_mat = self.generate_rate_matrix(equl_vecs, exch_mat, 
+                                          gamma_shape, k_subst)
         
         # normalize if desired
-        R_mat = R_mat_normFunc(R_mat, equl_vecs)
+        if self.norm:
+            R_mat = norm_rate_matrix(R_mat, equl_vecs)
         
         # multiply by time
         # log(exp(Rt)); (alph, alph, k_subst, k_equl)
@@ -251,48 +327,6 @@ class LG_mixture:
     
     
     ###############   v__(extra functions placed below)__v   ###############
-    def generate_rate_matrix(self, equl_vecs, lg_exch_file, 
-                             gamma_shape, k_subst):
-        """
-        ABOUT: calculating rate matrix R
-        JITTED: yes
-        WHEN IS THIS CALLED: whenever logprobs_at_t is called
-        OUTPUTS: (alphabet_size, alphabet_size, k_subst, k_equl) tensor
-        """
-        ### load LG exchangeabilities file
-        # (alphabet_size, alphabet_size) (i,j)
-        with open(lg_exch_file,'rb') as f:
-            exch_mat = jnp.load(f)
-        
-        ### multiply exchangeabilities by rate classes
-        # (alphabet_size, alphabet_size, k_subst) (i,j,k)
-        rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
-        exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
-        
-        ### create rate matrix
-        # (alphabet_size, alphabet_size, k_subst, k_equl) (i,j,k,l)
-        # fill in values for i != j 
-        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat, equl_vecs)
-        
-        # mask out only (i,j) diagonals
-        mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
-        rate_mat_without_diags = jnp.einsum('ijkl,ij->ijkl', 
-                                            raw_rate_mat, mask_inv)
-
-        # find rowsums i.e. sum across columns j
-        row_sums = rate_mat_without_diags.sum(axis=1)
-        row_sums_repeated = jnp.repeat(a=jnp.expand_dims(-row_sums, 1),
-                                        repeats=raw_rate_mat.shape[0],
-                                        axis=1)
-        mask = jnp.eye(raw_rate_mat.shape[0])
-        diags_to_add = jnp.einsum('ijkl,ij->ijkl', row_sums_repeated, mask)
-
-        # add both
-        subst_rate_mat = rate_mat_without_diags + diags_to_add
-        
-        return subst_rate_mat
-    
-    
     def generate_rate_classes(self, gamma_shape, k_subst):
         """
         ABOUT: given the gamma shape, generate vector of rate classes by

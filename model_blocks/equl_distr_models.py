@@ -24,8 +24,11 @@ Methods to generate equilibrium distributions:
      will not be scored
 
 
-shared class methods:
-=====================
+at a minimum, future classes need:
+==================================
+all can all inherit "no_equl" to get necessary methods that allow the class
+    to be passed into a jitted function
+    
 1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
@@ -53,10 +56,58 @@ from tensorflow_probability.substrates import jax as tfp
 smallest_float32 = jnp.finfo('float32').smallest_normal
 
 
+
+###############################################################################
+### no equl dist (placeholder class)   ########################################
+###############################################################################
+# use this to train without scoring emissions from insertion sites or omissions 
+#   from deletion sites; these counts will be multiplied by zero and not 
+#   contribute to loss/logprob
+class no_equl:
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit: None
+        hparams to pass on (or infer): None
+        """
+        return dict(), dict()
+        
+        
+    def equlVec_logprobs(self, params_dict, hparams_dict):
+        """
+        ABOUT: only return the equilibrium distribution seen from real data 
+               (this is usually needed for substitution model)
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration
+        OUTPUTS: 
+            - equl_vec: equilibrium distribution seen in real data
+            - empty_vec: placeholder vector for logP(emission/omission)=0
+        """
+        # equilibrium distribution of amino acids, probably provided by 
+        # the dataloader? make sure to give it an extra k_equl=1 dimension
+        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
+        return (equl_vec, jnp.zeros(equl_vec.shape))
+    
+    
+    ###  v__(these allow the class to be passed into a jitted function)__v  ###
+    def _tree_flatten(self):
+        children = ()
+        aux_data = {} 
+        return (children, aux_data)
+    
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        return cls()
+    
+    
 ###############################################################################
 ### single equlibrium vector: infer from given data   #########################
 ###############################################################################
-class equl_base:
+class equl_base(no_equl):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -94,7 +145,7 @@ class equl_base:
 ###############################################################################
 ### mixture model: sample from a dirichlet distribution   #####################
 ###############################################################################
-class equl_dirichletMixture:
+class equl_dirichletMixture(no_equl):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -258,7 +309,7 @@ class equl_dirichletMixture:
 ###############################################################################
 ### mixture model: manually provide equilibrium distributions to test   #######
 ###############################################################################
-class equl_mixture:
+class equl_mixture(no_equl):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -317,41 +368,3 @@ class equl_mixture:
         equl_vec = jnp.where(equl_vec!=0, equl_vec, smallest_float32)
         logprob_equl = jnp.log(equl_vec)
         return (equl_vec, logprob_equl) 
-    
-
-
-###############################################################################
-### no equl dist (placeholder class)   ########################################
-###############################################################################
-# use this to train without scoring emissions from insertion sites or omissions 
-#   from deletion sites; these counts will be multiplied by zero and not 
-#   contribute to loss/logprob
-class no_equl:
-    def initialize_params(self, argparse_obj):
-        """
-        ABOUT: return (possibly transformed) parameters
-        JITTED: no
-        WHEN IS THIS CALLED: once, upon model instantiation
-        OUTPUTS: dictionary of initial parameters for optax (if any)
-        
-        params to fit: None
-        hparams to pass on (or infer): None
-        """
-        return dict(), dict()
-        
-        
-    def equlVec_logprobs(self, params_dict, hparams_dict):
-        """
-        ABOUT: only return the equilibrium distribution seen from real data 
-               (this is usually needed for substitution model)
-        JITTED: yes
-        WHEN IS THIS CALLED: every training loop iteration
-        OUTPUTS: 
-            - equl_vec: equilibrium distribution seen in real data
-            - empty_vec: placeholder vector for logP(emission/omission)=0
-        """
-        # equilibrium distribution of amino acids, probably provided by 
-        # the dataloader? make sure to give it an extra k_equl=1 dimension
-        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
-        return (equl_vec, jnp.zeros(equl_vec.shape))
-    

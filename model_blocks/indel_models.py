@@ -20,8 +20,11 @@ Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 
 
 
-shared class methods:
-=====================
+at a minimum, future classes need:
+==================================
+all can all inherit "no_indel" to get necessary methods that allow the class
+    to be passed into a jitted function
+
 1. initialize_params(self, inputs_dict): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
@@ -48,10 +51,51 @@ from model_blocks.GGI_funcs import transitionMatrix
 smallest_float32 = jnp.finfo('float32').smallest_normal
 
 
+
+
+###############################################################################
+### no indel model (placeholder class)   ######################################
+###############################################################################
+# use this to train without an indel model; indel counts will be multiplied
+#   by zero and not contribute to loss/logprob
+class no_indel:
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit: None
+        hparams to pass on (or infer): None
+        """
+        return dict(), dict()
+        
+        
+    def logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: return a placeholder matrix for every time t
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration, every point t
+        OUTPUTS: empty transition matrix (3,3,1); P(transitions)=0
+        """
+        return jnp.zeros((3,3,1))
+    
+    ###  v__(these allow the class to be passed into a jitted function)__v  ###
+    def _tree_flatten(self):
+        children = ()
+        aux_data = {} 
+        return (children, aux_data)
+    
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        return cls()
+
+
 ###############################################################################
 ### single GGI indel model   ##################################################
 ###############################################################################
-class GGI_single:
+class GGI_single(no_indel):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -166,13 +210,13 @@ class GGI_single:
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
-        
-
+    
+    
 
 ###############################################################################
 ### mixture GGI indel model   #################################################
 ###############################################################################
-class GGI_mixture:
+class GGI_mixture(no_indel):
     def initialize_params(self, inputs_dict):
         """
         ABOUT: return (possibly transformed) parameters
@@ -307,34 +351,5 @@ class GGI_mixture:
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
-
-
-
-###############################################################################
-### no indel model (placeholder class)   ######################################
-###############################################################################
-# use this to train without an indel model; indel counts will be multiplied
-#   by zero and not contribute to loss/logprob
-class no_indel:
-    def initialize_params(self, argparse_obj):
-        """
-        ABOUT: return (possibly transformed) parameters
-        JITTED: no
-        WHEN IS THIS CALLED: once, upon model instantiation
-        OUTPUTS: dictionary of initial parameters for optax (if any)
-        
-        params to fit: None
-        hparams to pass on (or infer): None
-        """
-        return dict(), dict()
-        
-        
-    def logprobs_at_t(self, t, params_dict, hparams_dict):
-        """
-        ABOUT: return a placeholder matrix for every time t
-        JITTED: yes
-        WHEN IS THIS CALLED: every training loop iteration, every point t
-        OUTPUTS: empty transition matrix (3,3,1); P(transitions)=0
-        """
-        return jnp.zeros((3,3,1))
+    
     
