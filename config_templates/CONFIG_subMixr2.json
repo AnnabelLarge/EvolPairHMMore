@@ -1,0 +1,42 @@
+{
+	"training_wkdir": "RESULTS_mixTest",
+	"runname": "substMix_run2",
+	"rng_seednum": 0,
+
+	"alphabet_size": 20,
+	"have_precalculated_counts": false,
+	"loadtype": "eager",
+	"data_dir": "DEV-DATA_pair_alignments",
+	"train_dset_splits": ["FiveSamp"],
+	"test_dset_splits": ["FiveSamp"],
+	"batch_size": 5,
+
+	"num_epochs": 500,
+	"learning_rate": 0.01,
+	"patience": 500,
+
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 20,
+
+	"subst_model_type": "LG_mixture",
+	"norm": true,
+	"lg_exch_file": "LG08_exchangeability_r.npy",
+	"gap_tok": 63,
+	"subst_mix_logits": [3, 7],
+	"gamma_shape": 0.5,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": "GGI_single",
+	"lam":0.5,
+	"mu":0.5,
+	"x":0.5,
+	"y":0.5,
+	"diffrax_params": {
+		"step": null,
+		"rtol": 1e-3,
+		"atol": 1e-6
+	}
+
+}

@@ -1,0 +1,37 @@
+{
+	"training_wkdir": "RESULTS_mixTest",
+	"runname": "ggiMix_run1",
+	"rng_seednum": 0,
+
+	"alphabet_size": 20,
+	"have_precalculated_counts": false,
+	"loadtype": "eager",
+	"data_dir": "DEV-DATA_pair_alignments",
+	"train_dset_splits": ["FiveSamp"],
+	"test_dset_splits": ["FiveSamp"],
+	"batch_size": 5,
+
+	"num_epochs": 500,
+	"learning_rate": 0.005,
+	"patience": 500,
+
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 20,
+
+	"subst_model_type": "subst_base",
+	"norm": true,
+	"lg_exch_file": "LG08_exchangeability_r.npy",
+	"gap_tok": 63,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": "GGI_mixture",
+	"k_indel": 2,
+	"diffrax_params": {
+		"step": null,
+		"rtol": 1e-3,
+		"atol": 1e-6
+	}
+
+}
