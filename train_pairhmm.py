@@ -16,8 +16,6 @@ TODO:
 =====
 immediate:
 ----------
-- parser that reads a logfile and a pickle, then returns GGI params in an
-  easy-to-read format?
 - eval script that loads model and runs evaluation on some dataset
 
 
