@@ -55,6 +55,7 @@ import jax
 from jax import numpy as jnp
 from jax.nn import softmax
 from tensorflow_probability.substrates import jax as tfp
+import numpy as np
 
 # We replace zeroes and infinities with small numbers sometimes
 # It's sinful but BOY DO I LOVE SIN
@@ -253,7 +254,8 @@ class equl_dirichletMixture(no_equl):
         dirichlet_shape_transf = params_dict['dirichlet_shape_transf']
         
         ### unpack hyperparameters
-        k_equl = hparams_dict['k_equl']
+        # k_equl = hparams_dict['k_equl']
+        k_equl = params_dict['equl_mix_logits'].shape[0]
         alphabet_size = hparams_dict['alphabet_size']
         dirichlet_samp_key = hparams_dict['dirichlet_samp_key']
         
@@ -266,7 +268,7 @@ class equl_dirichletMixture(no_equl):
                                     dirichlet_shape, smallest_float32)
         
         # sample; dirichlet_shape is (alphabet_size, k_equl)
-        equl_vec = sample_dirichlet(dirichlet_samp_key, dirichlet_shape, k_equl)
+        equl_vec = self.sample_dirichlet(dirichlet_samp_key, dirichlet_shape, k_equl)
         
         # again, replace zeros with small values
         equl_vec = jnp.where(equl_vec != 0, 
@@ -295,8 +297,8 @@ class equl_dirichletMixture(no_equl):
         dirichlet_shape = softmax(dirichlet_shape_transf)
         
         # also turn them into regular numpy arrays, for writing JSON
-        equl_mix_params = np.array(equl_mix_logits).tolist()
-        dirichlet_shape = np.array(dirichlet_shape_transf).tolist()
+        equl_mix_params = np.array(equl_mix_params).tolist()
+        dirichlet_shape = np.array(dirichlet_shape).tolist()
         
         
         ### make output dictionary
@@ -433,7 +435,7 @@ class equl_mixture(no_equl):
         equl_mix_params = softmax(equl_mix_logits)
         
         # also turn them into regular numpy arrays, for writing JSON
-        equl_mix_params = np.array(equl_mix_logits).tolist()
+        equl_mix_params = np.array(equl_mix_params).tolist()
         
         
         ### add to parameter dictionary

@@ -57,6 +57,11 @@ def logsumexp_withZeros(x, axis):
     """
     helper function that's basically a logsumexp that isn't affected by zeros
     if the whole sum( exp(x) ) is zero, then also return zero (not log(0))
+    
+    see this about NaN's and jnp.where-
+    https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-
+      where-using-where:~:text=f32%5B1%2C3%5D%7B1%2C0%7D-,Gradients%20
+      contain%20NaN%20where%20using%20where,-%23
     """
     zero_val_mask = jnp.where(x != 0,
                               1,
@@ -66,9 +71,9 @@ def logsumexp_withZeros(x, axis):
     exp_x_masked = exp_x * zero_val_mask
     sumexp_x = jnp.sum(exp_x_masked, axis=axis)
     
-    logsumexp_x = jnp.where(sumexp_x != 0,
-                            jnp.log(sumexp_x),
-                            0)
+    logsumexp_x = jnp.log(jnp.where(sumexp_x > 0., 
+                                    sumexp_x, 
+                                    1.))
     return logsumexp_x
 
 
@@ -182,7 +187,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
             logP_counts_trans = jnp.einsum('bmn,mnz->bz',
                                            transCounts_persamp,
                                            logprob_transition_at_t)
-            
+        
             # return tuple of these four to deal with... later
             return (logP_counts_sub, logP_counts_ins, 
                     logP_counts_dels, logP_counts_trans)
@@ -235,7 +240,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         ### 2.2: log-softmax the mixture logits (if available)
         # get mixture logits from hparams OR pass in a dummy vector of 1
         # (k_subst,)
-        subst_mix_logits = params_toTrack.get('susbt_mix_logits', jnp.array([1]))
+        subst_mix_logits = params_toTrack.get('subst_mix_logits', jnp.array([1]))
         
         # (k_equl,)
         equl_mix_logits = params_toTrack.get('equl_mix_logits', jnp.array([1]))
@@ -248,7 +253,6 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         equl_mix_logprobs = log_softmax(equl_mix_logits)
         indel_mix_logprobs = log_softmax(indel_mix_logits)
         
-        
         ### 2.3: for substitution model, take care of substitution mixtures 
         ###      THEN equlibrium mixtures 
         # k_subs is at dim=1 (middle one out of three dimensions)
@@ -259,7 +263,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         # k_equl is now at dim=1 (last one out of three dimensions, but middle 
         #   dimension was removed, so now it's last out of two dimensions)
         with_equl_mix_weights = (logsumexp_along_k_subst +
-                                 jnp.expand_dims(equl_mix_logprobs, -1))
+                                 jnp.expand_dims(equl_mix_logprobs, 0))
         logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
         
         
@@ -284,6 +288,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         # sum all and return
         logP_perSamp = logP_subs + logP_ins + logP_dels + logP_trans
+        
         mean_alignment_logprob = jnp.mean(logP_perSamp)
         return -mean_alignment_logprob
         
@@ -438,7 +443,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ### 2.2: log-softmax the mixture logits (if available)
     # get mixture logits from hparams OR pass in a dummy vector of 1
     # (k_subst,)
-    subst_mix_logits = params_dict.get('susbt_mix_logits', jnp.array([1]))
+    subst_mix_logits = params_dict.get('subst_mix_logits', jnp.array([1]))
     
     # (k_equl,)
     equl_mix_logits = params_dict.get('equl_mix_logits', jnp.array([1]))
@@ -462,7 +467,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     # k_equl is now at dim=1 (last one out of three dimensions, but middle 
     #   dimension was removed, so now it's last out of two dimensions)
     with_equl_mix_weights = (logsumexp_along_k_subst +
-                             jnp.expand_dims(equl_mix_logprobs, -1))
+                             jnp.expand_dims(equl_mix_logprobs, 0))
     logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
     
     

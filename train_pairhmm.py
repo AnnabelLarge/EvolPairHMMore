@@ -278,10 +278,9 @@ def train_pairhmm(args):
 
         # if the training loss is nan, stop training
         if jnp.isnan(ave_epoch_train_loss):
-            print(f'NaN training loss at epoch {epoch_idx}')
             with open(args.logfile_name,'a') as g:
                 g.write(f'NaN training loss at epoch {epoch_idx}')
-            break
+            raise ValueError(f'NaN training loss at epoch {epoch_idx}')
         
         # free up variables
         del batch, allCounts, epoch_train_loss

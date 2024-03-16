@@ -297,13 +297,13 @@ class LG_mixture(subst_base):
         OUTPUTS: logP(substitutions)-
                  (alphabet_size, alphabet_size, k_subst, k_equl) tensor
         """
-        breakpoint()
         ### unpack parameters (what gets passed in/out of optax for updating)
         gamma_shape_transf = params_dict['gamma_shape_transf']
         
         ### unpack extra hyperparameters
         equl_vecs = hparams_dict['equl_vecs']
-        k_subst = hparams_dict['k_subst']
+        # k_subst = hparams_dict['k_subst']
+        k_subst = params_dict['subst_mix_logits'].shape[0]
         exch_mat = hparams_dict['exch_mat']
         
         ### turn gamma_shape_transf into gamma_shape
@@ -312,6 +312,7 @@ class LG_mixture(subst_base):
         gamma_shape_transf = jnp.where(gamma_shape_transf != 0,
                                        gamma_shape_transf,
                                        1e-10)
+        
         # undo domain transformation
         # gamma_shape_transf: (-inf, inf)
         # gamma_shape: (0, inf); NOT inclusive of zero!
@@ -319,12 +320,14 @@ class LG_mixture(subst_base):
         
         
         # generate the rate matrix
+        # instead of k_subst, try passing in a shape of a parameter 
+        # (should be the same thing)
         R_mat = self.generate_rate_matrix(equl_vecs, exch_mat, 
                                           gamma_shape, k_subst)
         
         # normalize if desired
         if self.norm:
-            R_mat = norm_rate_matrix(R_mat, equl_vecs)
+            R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
         
         # multiply by time
         # log(exp(Rt)); (alph, alph, k_subst, k_equl)
@@ -409,9 +412,11 @@ class LG_mixture(subst_base):
                                              rate=gamma_shape)
         
         # determine which quantiles to generate; can't generate the
-        # quantile for 1, but can get pretty close with the 99th percentile
-        quantiles_except_last = jnp.linspace(0, 1, k_subst+1)[:-1]
-        quantiles = jnp.concatenate([quantiles_except_last, jnp.array([0.99])])
+        # quantile for 0 or 1, so replace these with 0.01 and 0.99 respectively
+        middle_quantiles = jnp.linspace(0, 1, k_subst+1)[1:-1]
+        points_to_gen = jnp.concatenate( [ jnp.array([0.01]),
+                                          middle_quantiles, 
+                                          jnp.array([0.99]) ] )
         
         # retrieve the xvalues of the quantiles
         xvals_at_quantiles = gamma_dist.quantile(points_to_gen)
