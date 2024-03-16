@@ -35,6 +35,10 @@ at a minimum, future classes need:
 3. norm_rate_matrix(self, subst_rate_mat, equl_pi_mat): normalizes the
      rate matrix (as detailed above)
 
+4. undo_param_transform(self, params_dict): undo any domain transformations
+     and output regular list/ints; mainly used for recording results to
+     tensorboard, JSON, or anything else that doesn't like jax arrays
+
 
 universal order of dimensions:
 ==============================
@@ -53,7 +57,10 @@ todo:
 """
 import jax
 from jax import numpy as jnp
+from jax.nn import softmax
 from tensorflow_probability.substrates import jax as tfp
+import copy
+import numpy as np
 
 
 ###############################################################################
@@ -140,6 +147,16 @@ class subst_base:
         return out
     
     
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: placeholder function
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary as-is (empty)
+        """
+        return  dict()
+    
+    
     ###  v__(these allow the class to be passed into a jitted function)__v  ###
     def _tree_flatten(self):
         children = ()
@@ -152,21 +169,16 @@ class subst_base:
     
     
     ###############   v__(extra functions placed below)__v   ###############    
-    def generate_rate_matrix(self, equl_vecs, exch_mat, **rate_class_kwargs):
+    def generate_rate_matrix(self, equl_vecs, exch_mat):
         """
         ABOUT: calculating rate matrix R
         JITTED: yes
         WHEN IS THIS CALLED: whenever logprobs_at_t is called
         OUTPUTS: (alphabet_size, alphabet_size, 1, k_equl) tensor
         """
-        # these are just placeholders
-        gamma_shape = rate_class_kwargs.get('gamma_shape',-999)
-        k_subst = rate_class_kwargs.get('k_subst', -999)
-        
         ### no rate classes, so just expand dimensions to make k_subst axis
         # (alphabet_size, alphabet_size, 1) (i,j,k)
-        rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
-        exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
+        exch_mat_perClass = jnp.expand_dims(exch_mat, -1)
         
         ### create rate matrix
         # (alphabet_size, alphabet_size, 1, k_equl) (i,j,k,l)
@@ -190,13 +202,6 @@ class subst_base:
         
         return subst_rate_mat
     
-    
-    def generate_rate_classes(self, gamma_shape, k_subst):
-        """
-        placeholder; no rate classes used for single model
-        """
-        return jnp.array([1])
-
 
 
 ###############################################################################
@@ -253,7 +258,7 @@ class LG_mixture(subst_base):
         
         # if provided, just use what's provided
         else:
-            subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits)
+            subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits, dtype=float)
         
         
         ### HYPERPARAMETER: k_subst
@@ -277,7 +282,7 @@ class LG_mixture(subst_base):
         
         # dictionary of hyperparameters
         hparams = {'k_subst': k_subst,
-                   'alphabet_size': args.alphabet_size,
+                   'alphabet_size': argparse_obj.alphabet_size,
                    'exch_mat': exch_mat}
         
         return initialized_params, hparams
@@ -292,6 +297,7 @@ class LG_mixture(subst_base):
         OUTPUTS: logP(substitutions)-
                  (alphabet_size, alphabet_size, k_subst, k_equl) tensor
         """
+        breakpoint()
         ### unpack parameters (what gets passed in/out of optax for updating)
         gamma_shape_transf = params_dict['gamma_shape_transf']
         
@@ -326,7 +332,70 @@ class LG_mixture(subst_base):
         return logprob_substitution_at_t
     
     
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### unpack parameters
+        gamma_shape_transf = params_dict['gamma_shape_transf']
+        subst_mix_logits = params_dict['subst_mix_logits']
+        
+        
+        ### undo the domain transformation
+        gamma_shape = jnp.square(gamma_shape_transf)
+        subst_mix_probs = softmax(subst_mix_logits)
+        
+        # also turn them into regular lists, for writing JSON
+        gamma_shape = np.array(gamma_shape).tolist()
+        subst_mix_probs = np.array(subst_mix_probs).tolist()
+        
+        
+        ### add to parameter dictionary
+        out_dict = {}
+        out_dict['gamma_shape'] = gamma_shape
+        out_dict['subst_mix_probs'] = subst_mix_probs
+        
+        return out_dict
+    
+    
     ###############   v__(extra functions placed below)__v   ###############
+    def generate_rate_matrix(self, equl_vecs, exch_mat, gamma_shape, k_subst):
+        """
+        ABOUT: calculating rate matrix R
+        JITTED: yes
+        WHEN IS THIS CALLED: whenever logprobs_at_t is called
+        OUTPUTS: (alphabet_size, alphabet_size, k_subst, k_equl) tensor
+        """
+        ### get rate classes
+        # (alphabet_size, alphabet_size, k_subst) (i,j,k)
+        rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
+        exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
+        
+        ### create rate matrix
+        # (alphabet_size, alphabet_size, k_subst, k_equl) (i,j,k,l)
+        # fill in values for i != j 
+        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat_perClass, equl_vecs)
+        
+        # mask out only (i,j) diagonals
+        mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
+        rate_mat_without_diags = jnp.einsum('ijkl,ij->ijkl', raw_rate_mat, mask_inv)
+
+        # find rowsums i.e. sum across columns j
+        row_sums = rate_mat_without_diags.sum(axis=1)
+        row_sums_repeated = jnp.repeat(a=jnp.expand_dims(-row_sums, 1),
+                                        repeats=raw_rate_mat.shape[0],
+                                        axis=1)
+        mask = jnp.eye(raw_rate_mat.shape[0])
+        diags_to_add = jnp.einsum('ijkl,ij->ijkl', row_sums_repeated, mask)
+
+        # add both
+        subst_rate_mat = rate_mat_without_diags + diags_to_add
+        
+        return subst_rate_mat
+    
     def generate_rate_classes(self, gamma_shape, k_subst):
         """
         ABOUT: given the gamma shape, generate vector of rate classes by

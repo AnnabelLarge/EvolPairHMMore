@@ -25,12 +25,17 @@ at a minimum, future classes need:
 all can all inherit "no_indel" to get necessary methods that allow the class
     to be passed into a jitted function
 
-1. initialize_params(self, inputs_dict): initialize all parameters and 
+1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
 2. logprobs_at_t(self, t, params_dict, hparams_dict): calculate 
      logP(indels) at time t
+
+3. undo_param_transform(self, params_dict): undo any domain transformations
+     and output regular list/ints; mainly used for recording results to
+     tensorboard, JSON, or anything else that doesn't like jax arrays
+     > if NO transforms are needed, this can be inherited as-is from "no_indel"
        
 
 universal order of dimensions:
@@ -40,8 +45,11 @@ universal order of dimensions:
 3. k_equl
 4. k_indel
 """
+import numpy as np
+import copy
 import jax
 from jax import numpy as jnp
+from jax.nn import softmax
 
 ### will use the transitionMatrix function from Ian
 from model_blocks.GGI_funcs import transitionMatrix
@@ -49,8 +57,6 @@ from model_blocks.GGI_funcs import transitionMatrix
 # We replace zeroes and infinities with small numbers sometimes
 # It's sinful but BOY DO I LOVE SIN
 smallest_float32 = jnp.finfo('float32').smallest_normal
-
-
 
 
 ###############################################################################
@@ -80,6 +86,15 @@ class no_indel:
         OUTPUTS: empty transition matrix (3,3,1); P(transitions)=0
         """
         return jnp.zeros((3,3,1))
+    
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: placeholder function; no parameters in params_dict
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary as-is (empty)
+        """
+        return  dict()
     
     ###  v__(these allow the class to be passed into a jitted function)__v  ###
     def _tree_flatten(self):
@@ -212,12 +227,49 @@ class GGI_single(no_indel):
         return logprob_transition_at_t
     
     
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### unpack parameters
+        lam_transf = params_dict['lam_transf']
+        mu_transf = params_dict['mu_transf']
+        x_transf = params_dict['x_transf']
+        y_transf = params_dict['y_transf']
+        
+        
+        ### undo the domain transformation
+        lam = jnp.square(lam_transf)
+        mu = jnp.square(mu_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        y = jnp.exp(-jnp.square(y_transf))
+        
+        # also turn them into regular integers, for writing JSON
+        lam = lam.item()
+        mu = mu.item()
+        x = x.item()
+        y = y.item()
+        
+        
+        ### add to output dictionary
+        out_dict = {}
+        out_dict['lam'] = lam
+        out_dict['mu'] = mu
+        out_dict['x'] = x
+        out_dict['y'] = y
+        
+        return out_dict
+    
+    
 
 ###############################################################################
 ### mixture GGI indel model   #################################################
 ###############################################################################
 class GGI_mixture(no_indel):
-    def initialize_params(self, inputs_dict):
+    def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
         JITTED: no
@@ -254,27 +306,27 @@ class GGI_mixture(no_indel):
         ### PARAMETERS: ggi params
         # lambda
         if 'lam' not in provided_args:
-            lam = jnp.linspace(0.1, 0.9, k_indel)
+            lam = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
         else:
-            lam = argparse_obj.lam
+            lam = jnp.array(argparse_obj.lam)
         
         # mu
         if 'mu' not in provided_args:
-            mu = jnp.linspace(0.1, 0.9, k_indel)
+            mu = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
         else:
-            mu = argparse_obj.mu
+            mu = jnp.array(argparse_obj.mu)
             
         # x
         if 'x' not in provided_args:
-            x = jnp.linspace(0.1, 0.9, k_indel)
+            x = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
         else:
-            x = argparse_obj.x
+            x = jnp.array(argparse_obj.x)
         
         # y
         if 'y' not in provided_args:
-            y = jnp.linspace(0.1, 0.9, k_indel)
+            y = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
         else:
-            y = argparse_obj.y
+            y = jnp.array(argparse_obj.y)
         
         # for stochastic gradient descent, transform to (-inf, inf) domain
         # also add extra k_indel dimension
@@ -286,9 +338,9 @@ class GGI_mixture(no_indel):
         
         ### PARAMETER: mixture logits
         if 'indel_mix_logits' not in provided_args:
-            indel_mix_logits = jnp.ones(k_indel)
+            indel_mix_logits = jnp.ones(argparse_obj.k_indel)
         else:
-            indel_mix_logits = jnp.array(argparse_obj.indel_mix_logits)
+            indel_mix_logits = jnp.array(argparse_obj.indel_mix_logits, dtype=float)
         
         
         ### HYPERPARAMETER: number of mixtures
@@ -353,3 +405,42 @@ class GGI_mixture(no_indel):
         return logprob_transition_at_t
     
     
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### unpack parameters
+        lam_transf = params_dict['lam_transf']
+        mu_transf = params_dict['mu_transf']
+        x_transf = params_dict['x_transf']
+        y_transf = params_dict['y_transf']
+        indel_mix_logits= params_dict['indel_mix_logits']
+        
+        
+        ### undo the domain transformation
+        lam = jnp.square(lam_transf)
+        mu = jnp.square(mu_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        y = jnp.exp(-jnp.square(y_transf))
+        indel_mix_probs = softmax(indel_mix_logits)
+        
+        # also turn them into regular lists, for writing JSON
+        lam = np.array(lam).tolist()
+        mu = np.array(mu).tolist()
+        x = np.array(x).tolist()
+        y = np.array(y).tolist()
+        indel_mix_probs = np.array(indel_mix_probs).tolist()
+        
+        
+        ### add to output dictionary
+        out_dict = {}
+        out_dict['lam'] = lam
+        out_dict['mu'] = mu
+        out_dict['x'] = x
+        out_dict['y'] = y
+        out_dict['indel_mix_probs'] = indel_mix_probs
+        
+        return out_dict

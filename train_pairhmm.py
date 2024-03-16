@@ -41,9 +41,11 @@ pd.options.mode.chained_assignment = None # this is annoying
 import numpy as np
 import copy
 from tqdm import tqdm
+import json
 
 import jax
 from jax import numpy as jnp
+from jax import make_jaxpr
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -55,7 +57,7 @@ from utils.training_testing_fns import train_fn, eval_fn
 
 
 
-def train_ggi(args):
+def train_pairhmm(args):
     #################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
     #################################################
@@ -224,6 +226,7 @@ def train_ggi(args):
     best_epoch = -1
     best_train_loss = 9999
     
+    
     for epoch_idx in tqdm(range(args.num_epochs)):
         # default behavior is to not save model parameters or 
         #   eval set log likelihoods
@@ -289,34 +292,23 @@ def train_ggi(args):
             # swap the flag
             record_results = True
             
-            # add model information to the hyperparameters dictionary and save
-            #   to a pickle object
-            output_dict = copy.deepcopy(hparams)
-            del output_dict['exch_mat']
-            
-            if 'dirichlet_samp_key' in output_dict.keys():
-                del output_dict['dirichlet_samp_key']
-            
-            if 'equl_vecs_fromData' in output_dict.keys():
-                del output_dict['equl_vecs_fromData'] 
-            
+            # output model info to JSON file
+            output_dict = {}
             output_dict['subst_model_type'] = args.subst_model_type
-            output_dict['equl_model_type'] = args.subst_model_type
-            output_dict['indel_model_type'] = args.subst_model_type
+            output_dict['equl_model_type'] = args.equl_model_type
+            output_dict['indel_model_type'] = args.indel_model_type
             output_dict['epoch_of_training'] = epoch_idx
+            output_dict['alphabet_size'] = args.alphabet_size
 
-            with open(f'{args.model_ckpts_dir}/modelInfo_hyperparams.json', 'w') as g:
+            with open(f'{args.model_ckpts_dir}/modelInfo.json', 'w') as g:
                 json.dump(output_dict, g, indent="\t", sort_keys=True)
             del output_dict
             
             # save the parameters dictionary
-            output_dict = copy.deepcopy(params)
-            
-            for key, val in output_dict.items():
-                if val.size == 1:
-                    output_dict[key] = val.item()
-                else:
-                    output_dict[key] = val.tolist()
+            output_dict = {}
+            for modelClass in pairHMM:
+                params_toWrite = modelClass.undo_param_transform(params)
+                output_dict = {**output_dict, **params_toWrite}
             
             with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
                 json.dump(output_dict, g, indent="\t", sort_keys=True)
@@ -423,6 +415,7 @@ def train_ggi(args):
     ### when you're done with the function, close the tensorboard writer
     writer.close()
     
+    
 
 ##########################################
 ### BASIC CLI+JSON CONFIG IMPLEMENTATION #
@@ -430,6 +423,8 @@ def train_ggi(args):
 if __name__ == '__main__':
     import json
     import argparse 
+    import pandas as pd
+    import numpy as np
     
     # for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
@@ -439,17 +434,17 @@ if __name__ == '__main__':
     # INITIALIZE PARSER
     parser = argparse.ArgumentParser(prog='train_pairhmm')
     
+    
     # config files required to run
     parser.add_argument('--config-file',
                         type = str,
                         required=True,
                         help='Load configs from file in json format.')
     
+   
     # parse the arguments
     args = parser.parse_args()
     
-    # uncomment this if you're running in spyder
-    # args.config_file = 'CONFIG1_TEST.json'
     
     with open(args.config_file, 'r') as f:
         t_args = argparse.Namespace()
@@ -457,4 +452,4 @@ if __name__ == '__main__':
         args = parser.parse_args(namespace=t_args)
     
     # run training function
-    train_ggi(args)
+    train_pairhmm(args)

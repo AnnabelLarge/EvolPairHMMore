@@ -36,6 +36,11 @@ all can all inherit "no_equl" to get necessary methods that allow the class
 2. equlVec_logprobs(self, params_dict, hparams_dict): calculate equilibrium 
      vector and logP(emissions/omissions) i.e. log(equlibrium vector)
      NOTE THAT THIS DOES NOT DEPEND ON TIME!!!
+
+3. undo_param_transform(self, params_dict): undo any domain transformations
+     and output regular list/ints; mainly used for recording results to
+     tensorboard, JSON, or anything else that doesn't like jax arrays
+     > if NO transforms are needed, this can be inherited as-is from "no_equl"
        
 
 universal order of dimensions:
@@ -92,6 +97,15 @@ class no_equl:
         equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
         return (equl_vec, jnp.zeros(equl_vec.shape))
     
+    
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: placeholder function; no parameters in params_dict
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary as-is (empty)
+        """
+        return dict()
     
     ###  v__(these allow the class to be passed into a jitted function)__v  ###
     def _tree_flatten(self):
@@ -198,7 +212,7 @@ class equl_dirichletMixture(no_equl):
         
         # if provided, just use what's provided
         else:
-            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
+            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits, dtype=float)
 
         
         ### HYPERPARAMETERS: k_equl
@@ -262,6 +276,35 @@ class equl_dirichletMixture(no_equl):
         logprob_equl = jnp.log(equl_vec)
         
         return (equl_vec, logprob_equl) 
+    
+    
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### unpack parameters
+        equl_mix_logits = params_dict['equl_mix_logits']
+        dirichlet_shape_transf = params_dict['dirichlet_shape_transf']
+        
+        
+        ### undo the domain transformation
+        equl_mix_params = softmax(equl_mix_logits)
+        dirichlet_shape = softmax(dirichlet_shape_transf)
+        
+        # also turn them into regular numpy arrays, for writing JSON
+        equl_mix_params = np.array(equl_mix_logits).tolist()
+        dirichlet_shape = np.array(dirichlet_shape_transf).tolist()
+        
+        
+        ### make output dictionary
+        out_dict = {}
+        out_dict['equl_mix_params'] = equl_mix_params
+        out_dict['dirichlet_shape'] = dirichlet_shape
+        
+        return out_dict
     
     
     ###############   v__(extra functions placed below)__v   ###############  
@@ -368,3 +411,32 @@ class equl_mixture(no_equl):
         equl_vec = jnp.where(equl_vec!=0, equl_vec, smallest_float32)
         logprob_equl = jnp.log(equl_vec)
         return (equl_vec, logprob_equl) 
+
+
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        out_dict = copy.deepcopy(params_dict)
+        
+        ### unpack parameters
+        equl_mix_logits = out_dict['equl_mix_logits']
+        
+        # remove transformed versions from dictionary
+        del out_dict['equl_mix_logits']
+        
+        
+        ### undo the domain transformation
+        equl_mix_params = softmax(equl_mix_logits)
+        
+        # also turn them into regular numpy arrays, for writing JSON
+        equl_mix_params = np.array(equl_mix_logits).tolist()
+        
+        
+        ### add to parameter dictionary
+        out_dict['equl_mix_params'] = equl_mix_params
+        
+        return out_dict

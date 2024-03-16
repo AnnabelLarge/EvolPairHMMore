@@ -49,19 +49,50 @@ from jax.nn import log_softmax
 # It's sinful but BOY DO I LOVE SIN
 smallest_float32 = jnp.finfo('float32').smallest_normal
 
-# use this function to logsumexp when elements of vector could be zero 
-#   (and should NOT be added); only noticeably a problem when logsumexp 
-#   along insertions and deletions, because sample could have... no 
-#   insertions or no deletions
+
+###############################################################################
+### HELPER FUNCTIONS   ########################################################
+###############################################################################
 def logsumexp_withZeros(x, axis):
-    exp_vec = jnp.exp(x)
-    exp_vec_masked = jnp.where(exp_vec != 1, exp_vec, 0)
-    sum_exp_vec = jnp.sum(exp_vec_masked, axis=axis)
-    return jnp.where(sum_exp_vec != 0,
-                     jnp.log(sum_exp_vec),
-                     0)
+    """
+    helper function that's basically a logsumexp that isn't affected by zeros
+    if the whole sum( exp(x) ) is zero, then also return zero (not log(0))
+    """
+    zero_val_mask = jnp.where(x != 0,
+                              1,
+                              0)
+    
+    exp_x = jnp.exp(x)
+    exp_x_masked = exp_x * zero_val_mask
+    sumexp_x = jnp.sum(exp_x_masked, axis=axis)
+    
+    logsumexp_x = jnp.where(sumexp_x != 0,
+                            jnp.log(sumexp_x),
+                            0)
+    return logsumexp_x
 
 
+# use this to logsumexp across timepoints (includes normalization by 1/N)
+def marginalize_across_t(logprob_mat, num_timepoints, norm_axis=0):
+    """
+    P(A) = sum_t[P(A|t)P(t)]
+    logP(A) = logsumexp(logP(A|t) + logP(t))
+    
+    P(t) = 1/num_timepoints
+    """
+    ### normalize with logP(t) = log(1/N)
+    logprob_mat_normed = logprob_mat + jnp.log(1/num_timepoints)
+    
+    ### logsumexp
+    logsumexp_probs = logsumexp_withZeros(logprob_mat_normed, 
+                                          axis=norm_axis)
+    return logsumexp_probs
+
+
+
+###############################################################################
+### MAIN FUNCTIONS   ##########################################################
+###############################################################################
 def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
              training_rngkey):
     """
@@ -179,19 +210,26 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         ################################################
         ### 2: SUM ACROSS TIME ARRAY, MIXTURE MODELS   #
         ################################################
-        ### 2.1: logsumexp each array in the tuple across the time arrays, 
-        ###      then normalize by time t
+        ### 2.1: marginalize across t
         # (batch, k_subst, k_equl)
-        sub_logprobs_perMix = logsumexp_withZeros(sub_logprobs_perTime_perMix, axis=0)/num_timepoints
+        sub_logprobs_perMix = marginalize_across_t(sub_logprobs_perTime_perMix, 
+                                                   num_timepoints,
+                                                   norm_axis=0)
         
         # (batch, k_equl)
-        ins_logprobs_perMix = logsumexp_withZeros(ins_logprobs_perTime_perMix, axis=0)/num_timepoints
+        ins_logprobs_perMix = marginalize_across_t(ins_logprobs_perTime_perMix, 
+                                                   num_timepoints,
+                                                   norm_axis=0)
         
         # (batch, k_equl)
-        del_logprobs_perMix = logsumexp_withZeros(del_logprobs_perTime_perMix, axis=0)/num_timepoints
+        del_logprobs_perMix = marginalize_across_t(del_logprobs_perTime_perMix, 
+                                                   num_timepoints,
+                                                   norm_axis=0)
         
         # (batch, k_indel)
-        trans_logprobs_perMix = logsumexp_withZeros(trans_logprobs_perTime_perMix, axis=0)/num_timepoints
+        trans_logprobs_perMix = marginalize_across_t(trans_logprobs_perTime_perMix, 
+                                                     num_timepoints,
+                                                     norm_axis=0)
         
         
         ### 2.2: log-softmax the mixture logits (if available)
@@ -212,31 +250,35 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         
         ### 2.3: for substitution model, take care of substitution mixtures 
-        ###      THEN equlibrium mixtures (do this explicitly with einsum, 
-        ###      to avoid confusion)
-        with_subst_mix_weights = jnp.einsum('bxy,x->bxy', 
-                                            sub_logprobs_perMix,
-                                            subst_mix_logprobs)
+        ###      THEN equlibrium mixtures 
+        # k_subs is at dim=1 (middle one out of three dimensions)
+        with_subst_mix_weights = (sub_logprobs_perMix +
+                                  jnp.expand_dims(subst_mix_logprobs, (0,2)))
         logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=1)
-        with_equl_mix_weights = jnp.einsum('by,y->by',
-                                           logsumexp_along_k_subst,
-                                           equl_mix_logprobs)
+        
+        # k_equl is now at dim=1 (last one out of three dimensions, but middle 
+        #   dimension was removed, so now it's last out of two dimensions)
+        with_equl_mix_weights = (logsumexp_along_k_subst +
+                                 jnp.expand_dims(equl_mix_logprobs, -1))
         logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
         
         
         ### 2.4: logP(emissions at insert sites) and 
         ###      logP(omissions at delete sites)
         # insertions
-        with_ins_mix_weights = ins_logprobs_perMix + equl_mix_logprobs
+        with_ins_mix_weights = (ins_logprobs_perMix + 
+                                jnp.expand_dims(equl_mix_logprobs, 0))
         logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
         
         # deletions
-        with_dels_mix_weights = del_logprobs_perMix + equl_mix_logprobs
+        with_dels_mix_weights = (del_logprobs_perMix + 
+                                 jnp.expand_dims(equl_mix_logprobs, 0))
         logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
         
         
         ### 2.5: logP(transitions)
-        with_indel_mix_weights = trans_logprobs_perMix + indel_mix_logprobs
+        with_indel_mix_weights = (trans_logprobs_perMix + 
+                                  jnp.expand_dims(indel_mix_logprobs, 0))
         logP_trans = logsumexp_withZeros(with_indel_mix_weights, axis=1)
         
         
@@ -371,19 +413,26 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ################################################
     ### 2: SUM ACROSS TIME ARRAY, MIXTURE MODELS   #
     ################################################
-    ### 2.1: logsumexp each array in the tuple across the time arrays, 
-    ###      then normalize by time t
+    ### 2.1: marginalize across t
     # (batch, k_subst, k_equl)
-    sub_logprobs_perMix = logsumexp_withZeros(sub_logprobs_perTime_perMix, axis=0)/num_timepoints
+    sub_logprobs_perMix = marginalize_across_t(sub_logprobs_perTime_perMix, 
+                                               num_timepoints,
+                                               norm_axis=0)
     
     # (batch, k_equl)
-    ins_logprobs_perMix = logsumexp_withZeros(ins_logprobs_perTime_perMix, axis=0)/num_timepoints
+    ins_logprobs_perMix = marginalize_across_t(ins_logprobs_perTime_perMix, 
+                                               num_timepoints,
+                                               norm_axis=0)
     
     # (batch, k_equl)
-    del_logprobs_perMix = logsumexp_withZeros(del_logprobs_perTime_perMix, axis=0)/num_timepoints
+    del_logprobs_perMix = marginalize_across_t(del_logprobs_perTime_perMix, 
+                                               num_timepoints,
+                                               norm_axis=0)
     
     # (batch, k_indel)
-    trans_logprobs_perMix = logsumexp_withZeros(trans_logprobs_perTime_perMix, axis=0)/num_timepoints
+    trans_logprobs_perMix = marginalize_across_t(trans_logprobs_perTime_perMix, 
+                                                 num_timepoints,
+                                                 norm_axis=0)
     
     
     ### 2.2: log-softmax the mixture logits (if available)
@@ -404,40 +453,48 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     
     ### 2.3: for substitution model, take care of substitution mixtures 
-    ###      THEN equlibrium mixtures (do this explicitly with einsum, 
-    ###      to avoid confusion)
-    with_subst_mix_weights = jnp.einsum('bxy,x->bxy', 
-                                        sub_logprobs_perMix,
-                                        subst_mix_logprobs)
+    ###      THEN equlibrium mixtures 
+    # k_subs is at dim=1 (middle one out of three dimensions)
+    with_subst_mix_weights = (sub_logprobs_perMix +
+                              jnp.expand_dims(subst_mix_logprobs, (0,2)))
     logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=1)
-    with_equl_mix_weights = jnp.einsum('by,y->by',
-                                       logsumexp_along_k_subst,
-                                       equl_mix_logprobs)
+    
+    # k_equl is now at dim=1 (last one out of three dimensions, but middle 
+    #   dimension was removed, so now it's last out of two dimensions)
+    with_equl_mix_weights = (logsumexp_along_k_subst +
+                             jnp.expand_dims(equl_mix_logprobs, -1))
     logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
     
     
     ### 2.4: logP(emissions at insert sites) and 
     ###      logP(omissions at delete sites)
     # insertions
-    with_ins_mix_weights = ins_logprobs_perMix + equl_mix_logprobs
+    with_ins_mix_weights = (ins_logprobs_perMix + 
+                            jnp.expand_dims(equl_mix_logprobs, 0))
     logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
     
     # deletions
-    with_dels_mix_weights = del_logprobs_perMix + equl_mix_logprobs
+    with_dels_mix_weights = (del_logprobs_perMix + 
+                             jnp.expand_dims(equl_mix_logprobs, 0))
     logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
     
     
-    ### 2.5: logP(transitions); calculate loss
-    with_indel_mix_weights = trans_logprobs_perMix + indel_mix_logprobs
+    ### 2.5: logP(transitions)
+    with_indel_mix_weights = (trans_logprobs_perMix + 
+                              jnp.expand_dims(indel_mix_logprobs, 0))
     logP_trans = logsumexp_withZeros(with_indel_mix_weights, axis=1)
-    loss = -jnp.mean(logP_subs + logP_ins + logP_dels + logP_trans)
     
     
+    # sum all and return
+    total_logprobs_persamp = logP_subs + logP_ins + logP_dels + logP_trans
+    
+    loss = -jnp.mean(total_logprobs_persamp)
+    
+
     ##############################################
     ### 3: RETURN LOSS AND INDIVIDUAL LOGPROBS   #
     ##############################################
     # isolate different terms of the loss
-    total_logprobs_persamp = logP_subs + logP_ins + logP_dels + logP_trans
     logprobs_persamp = jnp.concatenate([jnp.expand_dims(logP_subs, 1),
                                         jnp.expand_dims((logP_subs + logP_ins), 1),
                                         jnp.expand_dims(logP_trans, 1),
