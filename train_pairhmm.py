@@ -164,7 +164,6 @@ def train_pairhmm(args):
     ###########################
     ### 2: INITIALIZE MODEL   #
     ###########################
-    # subst_model, equl_model, indel_model, R_mat_normFunc
     ### 2.1: initialize the equlibrium distribution(s)
     equl_model_params, equl_model_hparams = equl_model.initialize_params(argparse_obj=args)
     
@@ -289,27 +288,49 @@ def train_pairhmm(args):
             # swap the flag
             record_results = True
             
-            # output model info to JSON file
-            output_dict = {}
-            output_dict['subst_model_type'] = args.subst_model_type
-            output_dict['equl_model_type'] = args.equl_model_type
-            output_dict['indel_model_type'] = args.indel_model_type
-            output_dict['epoch_of_training'] = epoch_idx
-            output_dict['alphabet_size'] = args.alphabet_size
-
-            with open(f'{args.model_ckpts_dir}/modelInfo.json', 'w') as g:
-                json.dump(output_dict, g, indent="\t", sort_keys=True)
-            del output_dict
+            # output all possible things needed to load a model later
+            OUT_forLoad = {'subst_model_type': args.subst_model_type,
+                           'equl_model_type': args.equl_model_type,
+                           'indel_model_type': args.indel_model_type,
+                           'norm': args.norm,
+                           'alphabet_size': args.alphabet_size,
+                           't_grid_center': args.t_grid_center,
+                           't_grid_step': args.t_grid_step,
+                           't_grid_num_steps': args.t_grad_num_steps
+                           }
             
-            # save the parameters dictionary
-            output_dict = {}
+            if 'diffrax_params' in dir(args):
+                OUT_forLoad['diffrax_params'] = args.diffrax_params
+            
+            if 'exch_file' in dir(args):
+                OUT_forLoad['exch_file'] = args.exch_file
+            
+            # add (possibly transformed) parameters
+            for key, val in params.items():
+                if val.shape == (1,):
+                    OUT_forLoad[key] = val.item()
+                else:
+                    OUT_forLoad[key] = np.array(val)
+            
+            # undo any possible parameter transformations and add to 
+            #   1.) the dictionary of all possible things needed to load a 
+            #   model, and 2.) a human-readable JSON of parameters
+            OUT_params = {}
             for modelClass in pairHMM:
                 params_toWrite = modelClass.undo_param_transform(params)
-                output_dict = {**output_dict, **params_toWrite}
+                OUT_forLoad = {**OUT_forLoad, params_toWrite}
+                OUT_params = {**OUT_params, **params_toWrite}
+
+            OUT_params['epoch_of_training']= epoch_idx
+            
+            # dump json files
+            with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
+                json.dump(OUT_hparams, g, indent="\t", sort_keys=True)
+            del OUT_hparams
             
             with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
-                json.dump(output_dict, g, indent="\t", sort_keys=True)
-            del output_dict
+                json.dump(OUT_params, g, indent="\t", sort_keys=True)
+            del OUT_params
             
             # record to log file
             with open(args.logfile_name,'a') as g:
@@ -322,7 +343,7 @@ def train_pairhmm(args):
         ### 3.5: CHECK PERFORMANCE ON HELD-OUT TEST SET
         eval_df_lst = []
         epoch_test_loss = 0
-        for batch in test_dl:
+        for batch_idx,batch in enumerate(test_dl):
             # fold in epoch_idx and batch_idx for eval (use negative value, 
             #   to have distinctly different random keys from training)
             rngkey_for_eval = jax.random.fold_in(rngkey, -(epoch_idx+batch_idx))

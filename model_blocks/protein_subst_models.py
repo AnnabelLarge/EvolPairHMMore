@@ -87,8 +87,8 @@ class subst_base:
             - alphabet_size
             - exchangeabilities matrix
         """
-        ### load LG exchangeabilities file
-        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.lg_exch_file}'
+        ### load exchangeabilities file
+        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
         with open(file_to_load,'rb') as f:
             exch_mat = jnp.load(f)
         
@@ -269,8 +269,8 @@ class LG_mixture(subst_base):
             k_subst = argparse_obj.k_subst
         
         
-        ### load LG exchangeabilities file
-        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.lg_exch_file}'
+        ### load exchangeabilities file
+        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
         with open(file_to_load,'rb') as f:
             exch_mat = jnp.load(f)
         

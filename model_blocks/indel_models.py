@@ -51,7 +51,7 @@ import jax
 from jax import numpy as jnp
 from jax.nn import softmax
 
-### will use the transitionMatrix function from Ian
+### if training/evaluating GGI model, use the functions from Ian
 from model_blocks.GGI_funcs import transitionMatrix
 
 # We replace zeroes and infinities with small numbers sometimes
@@ -137,9 +137,6 @@ class GGI_single(no_indel):
             
         hparams to pass on (or infer): None
         """
-        ### will use the transitionMatrix function from Ian
-        from model_blocks.GGI_funcs import transitionMatrix
-        
         provided_args = dir(argparse_obj)
         
         ### PARAMETERS: ggi params
@@ -301,6 +298,7 @@ class GGI_mixture(no_indel):
               > DEFAULT: length of mixture logits vector
             
         """
+        ### will use the transitionMatrix function from Ian
         provided_args = dir(argparse_obj)
         
         ### PARAMETERS: ggi params
