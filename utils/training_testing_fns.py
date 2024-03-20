@@ -164,7 +164,6 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                                                 params_toTrack, 
                                                                 hparams_dict)
             
-            
             ###############################################################
             ### 1.2: multiply counts by logprobs (let einsum handle this) #
             ###############################################################

@@ -191,7 +191,8 @@ class subst_base:
 
         # find rowsums i.e. sum across columns j
         row_sums = rate_mat_without_diags.sum(axis=1)
-        row_sums_repeated = jnp.repeat(a=jnp.expand_dims(-row_sums, 1),
+        neg_row_sums = -row_sums
+        row_sums_repeated = jnp.repeat(a=jnp.expand_dims(neg_row_sums, 1),
                                         repeats=raw_rate_mat.shape[0],
                                         axis=1)
         mask = jnp.eye(raw_rate_mat.shape[0])

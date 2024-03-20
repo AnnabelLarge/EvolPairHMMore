@@ -217,8 +217,8 @@ class GGI_single(no_indel):
                                      alphabet_size,
                                      **diffrax_params)
         
-        # if any position in transmat is zero, replace with smallest_float32
-        transmat = jnp.where(transmat == 0, smallest_float32, transmat)
+        # if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
@@ -396,8 +396,8 @@ class GGI_mixture(no_indel):
                                      alphabet_size,
                                      **diffrax_params)
         
-        # if any position in transmat is zero, replace with smallest_float32
-        transmat = jnp.where(transmat == 0, smallest_float32, transmat)
+        # if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
