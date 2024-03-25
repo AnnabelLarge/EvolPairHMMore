@@ -71,7 +71,6 @@ def load_all_data(folder_name, first_config_filename):
     elif not args.have_precalculated_counts:
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
-        from calcCounts_Train.summarize_alignment import summarize_alignment
         
         
     ### READ WITH PYTORCH DATALOADERS    
@@ -119,6 +118,7 @@ def train_batch(args, output_from_loading_func):
     # Use this training mode if you need to calculate emission and transition  
     #   counts from pair alignments
     elif not args.have_precalculated_counts:
+        from calcCounts_Train.summarize_alignment import summarize_alignment
         to_add = ('Calculating counts matrices from alignments, then'+
                   ' training\n\n')
         
@@ -320,7 +320,7 @@ def train_batch(args, output_from_loading_func):
                            'alphabet_size': args.alphabet_size,
                            't_grid_center': args.t_grid_center,
                            't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grad_num_steps
+                           't_grid_num_steps': args.t_grid_num_steps
                            }
             
             if 'diffrax_params' in dir(args):
@@ -334,7 +334,7 @@ def train_batch(args, output_from_loading_func):
                 if val.shape == (1,):
                     OUT_forLoad[key] = val.item()
                 else:
-                    OUT_forLoad[key] = np.array(val)
+                    OUT_forLoad[key] = np.array(val).tolist()
             
             # undo any possible parameter transformations and add to 
             #   1.) the dictionary of all possible things needed to load a 
@@ -349,8 +349,8 @@ def train_batch(args, output_from_loading_func):
             
             # dump json files
             with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
-                json.dump(OUT_hparams, g, indent="\t", sort_keys=True)
-            del OUT_hparams
+                json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
+            del OUT_forLoad
             
             with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
                 json.dump(OUT_params, g, indent="\t", sort_keys=True)
@@ -476,14 +476,15 @@ if __name__ == '__main__':
     ### INITIALIZE PARSER
     parser = argparse.ArgumentParser(prog='train_batch')
     
-    # config files required to run
-    parser.add_argument('--config-folder',
-                        type=str,
-                        required=True,
-                        help='Load configs from this folder, in json format.')
+    # # config files required to run
+    # parser.add_argument('--config-folder',
+    #                     type=str,
+    #                     required=True,
+    #                     help='Load configs from this folder, in json format.')
     
     # parse the arguments
     init_args = parser.parse_args()
+    init_args.config_folder = 'CONFIGS'
     
     
     ### MAIN PROGRAM
