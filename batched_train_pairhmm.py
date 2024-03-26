@@ -476,15 +476,14 @@ if __name__ == '__main__':
     ### INITIALIZE PARSER
     parser = argparse.ArgumentParser(prog='train_batch')
     
-    # # config files required to run
-    # parser.add_argument('--config-folder',
-    #                     type=str,
-    #                     required=True,
-    #                     help='Load configs from this folder, in json format.')
+    # config files required to run
+    parser.add_argument('--config-folder',
+                        type=str,
+                        required=True,
+                        help='Load configs from this folder, in json format.')
     
     # parse the arguments
     init_args = parser.parse_args()
-    init_args.config_folder = 'CONFIGS'
     
     
     ### MAIN PROGRAM
