@@ -183,7 +183,7 @@ class subst_base:
         ### create rate matrix
         # (alphabet_size, alphabet_size, 1, k_equl) (i,j,k,l)
         # fill in values for i != j 
-        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat_perClass, equl_vecs)
+        raw_rate_mat = jnp.einsum('ijk, jl -> ijkl', exch_mat_perClass, equl_vecs)
         
         # mask out only (i,j) diagonals
         mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
@@ -381,7 +381,7 @@ class LG_mixture(subst_base):
         ### create rate matrix
         # (alphabet_size, alphabet_size, k_subst, k_equl) (i,j,k,l)
         # fill in values for i != j 
-        raw_rate_mat = jnp.einsum('ijk, il -> ijkl', exch_mat_perClass, equl_vecs)
+        raw_rate_mat = jnp.einsum('ijk, jl -> ijkl', exch_mat_perClass, equl_vecs)
         
         # mask out only (i,j) diagonals
         mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
