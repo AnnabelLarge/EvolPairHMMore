@@ -77,19 +77,14 @@ def logsumexp_withZeros(x, axis):
     return logsumexp_x
 
 
-# use this to logsumexp across timepoints (includes normalization by 1/N)
+# use this to logsumexp across timepoints; like a reimann sum to approx
+#   true marginal
 def marginalize_across_t(logprob_mat, num_timepoints, norm_axis=0):
     """
-    P(A) = sum_t[P(A|t)P(t)]
-    logP(A) = logsumexp(logP(A|t) + logP(t))
-    
-    P(t) = 1/num_timepoints
+    P(A) = sum_t[ P(A|t) P(t) c ] dt
+    logP(A) = logsumexp(logP(A|t) + logP(t) + log(c) + log(dt))
     """
-    ### normalize with logP(t) = log(1/N)
-    logprob_mat_normed = logprob_mat + jnp.log(1/num_timepoints)
-    
-    ### logsumexp
-    logsumexp_probs = logsumexp_withZeros(logprob_mat_normed, 
+    logsumexp_probs = logsumexp_withZeros(logprob_mat, 
                                           axis=norm_axis)
     return logsumexp_probs
 

@@ -54,7 +54,6 @@ universal order of dimensions:
 import jax
 from jax import numpy as jnp
 from jax.nn import softmax
-from tensorflow_probability.substrates import jax as tfp
 import numpy as np
 
 # We replace zeroes and infinities with small numbers sometimes
@@ -150,8 +149,8 @@ class equl_base(no_equl):
         # equilibrium distribution of amino acids, probably provided by 
         # the dataloader? make sure to give it an extra k_equl dimension
         equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
-        equl_vec = jnp.where(equl_vec!=0, equl_vec, 1)
-        logprob_equl = jnp.log(equl_vec)
+        equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, 1)
+        logprob_equl = jnp.log(equl_vec_noZeros)
         
         return (equl_vec, logprob_equl)
 
@@ -254,7 +253,6 @@ class equl_dirichletMixture(no_equl):
         dirichlet_shape_transf = params_dict['dirichlet_shape_transf']
         
         ### unpack hyperparameters
-        # k_equl = hparams_dict['k_equl']
         k_equl = params_dict['equl_mix_logits'].shape[0]
         alphabet_size = hparams_dict['alphabet_size']
         dirichlet_samp_key = hparams_dict['dirichlet_samp_key']
@@ -271,12 +269,12 @@ class equl_dirichletMixture(no_equl):
         equl_vec = self.sample_dirichlet(dirichlet_samp_key, dirichlet_shape, k_equl)
         
         # replace zeros with 1 such that log(1)=0
-        equl_vec = jnp.where(equl_vec != 0, 
-                             equl_vec, 
-                             1)
+        equl_vec_noZeros = jnp.where(equl_vec != 0, 
+                                     equl_vec, 
+                                     1)
         
         ### log transform for logprob_equl
-        logprob_equl = jnp.log(equl_vec)
+        logprob_equl = jnp.log(equl_vec_noZeros)
         
         return (equl_vec, logprob_equl) 
     
@@ -411,8 +409,8 @@ class equl_mixture(no_equl):
         """
         # equilibrium distribution of amino acids
         equl_vec = hparams_dict['equl_vecs']
-        equl_vec = jnp.where(equl_vec!=0, equl_vec, 1)
-        logprob_equl = jnp.log(equl_vec)
+        equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, 1)
+        logprob_equl = jnp.log(equl_vec_noZeros)
         return (equl_vec, logprob_equl) 
 
 

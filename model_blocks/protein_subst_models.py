@@ -29,22 +29,27 @@ at a minimum, future classes need:
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
      
-2. logprobs_at_t(self, t, params_dict, hparams_dict): calculate 
-     logP(substitutions) at time t
+2. conditional_logprobs_at_t(self, t, params_dict, hparams_dict): calculate 
+     conditional probability of substitution- logP(x(t) | x(0))
 
-3. norm_rate_matrix(self, subst_rate_mat, equl_pi_mat): normalizes the
+3. joint_logprobs_at_t(self, t, params_dict, hparams_dict): calculate joint
+      probability of substitution- 
+      logP(x(t), x(0)) = logP(x(t) | x(0)) + logP( x(0) )
+      (this could be inherited from base class, if not too involved)
+
+4. norm_rate_matrix(self, subst_rate_mat, equl_pi_mat): normalizes the
      rate matrix (as detailed above)
 
-4. undo_param_transform(self, params_dict): undo any domain transformations
+5. undo_param_transform(self, params_dict): undo any domain transformations
      and output regular list/ints; mainly used for recording results to
      tensorboard, JSON, or anything else that doesn't like jax arrays
 
 
 universal order of dimensions:
 ==============================
-0. logprob matrix/vectors
-2. k_subst
-3. k_equl
+0. logprob matrix/vectors (i,j)
+2. k_subst                (k)
+3. k_equl                 (l)
 4. k_indel
 
 
@@ -99,13 +104,14 @@ class subst_base:
         return dict(), hparams
     
     
-    def logprobs_at_t(self, t, params_dict, hparams_dict):
+    def conditional_logprobs_at_t(self, t, params_dict, hparams_dict):
         """
-        ABOUT: calculate the logP(substitutions); multiply by counts 
-               during training
+        ABOUT: calculate logP(x(t)=j | x(0)=i); could multiply by counts 
+               during training, if desired
         JITTED: yes
         WHEN IS THIS CALLED: every training loop, every timepoint
-        OUTPUTS: logP(substitutions)
+        OUTPUTS: logP(x(t)=j | x(0)=i), the conditional log-probability of 
+                 substitutions
                  a (alphabet_size, alphabet_size, 1, k_equl) tensor
         """
         # unpack extra hyperparameters
@@ -121,9 +127,37 @@ class subst_base:
         
         # multiply by time
         # log(exp(Rt)); (alph, alph, k_subst=1, k_equl)
-        logprob_substitution_at_t = R_mat * t
-        return logprob_substitution_at_t
+        cond_logprob_substitution_at_t = R_mat * t
+        
+        return cond_logprob_substitution_at_t
     
+    
+    def joint_logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: calculate logP(x(t)=j, x(0)=i); could multiply by counts 
+               during training, if desired
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop, every timepoint
+        OUTPUTS: logP(x(t)=j, x(0)=i), the joint log-probability of 
+                 substitutions
+                 a (alphabet_size, alphabet_size, 1, k_equl) tensor
+        """
+        # unpack extra hyperparameters
+        equl_vecs = hparams_dict['equl_vecs']
+        
+        # the conditional logprobability
+        # (alph, alph, k_subst=1, k_equl)
+        cond_logprob = self.conditional_logprobs_at_t(t, params_dict, hparams_dict)
+        
+        # multiply by equilibrium distribution again
+        # cond_logprob is (alph, alph, k_subst=1, k_equl)  (i,j,k,l)
+        # equl_dists is (alphabet_size, k_equl)            (i,l)
+        joint_logprob_substitution_at_t = jnp.einsum('ijkl,il->ijkl', 
+                                                     cond_logprob,
+                                                     equl_vecs)
+        
+        return joint_logprob_substitution_at_t
+        
     
     def norm_rate_matrix(self, subst_rate_mat, equl_pi_mat):
         """
@@ -134,16 +168,16 @@ class subst_base:
                              is true
         OUTPUTS: normalized rate matrix
         """
-        ### diag will be (k_subst, k_equl, alphabet_size) (i,j,k)
+        ### diag will be (k_subst, k_equl, alphabet_size) (k,l,i)
         diag = jnp.diagonal(subst_rate_mat, axis1=0, axis2=1)
         
-        ### equl_dists is (alphabet_size, k_equl) (k, j)
-        ###    output is (k_subst, k_equl) (i,j)
-        R_times_pi = -jnp.einsum('ijk, kj -> ij', diag, equl_pi_mat)
+        ### equl_dists is (alphabet_size, k_equl)
+        ###    output is (k_subst, k_equl) (k,l)
+        norm_factor = -jnp.einsum('kli, il -> kl', diag, equl_pi_mat)
         
         ### divide each subst_rate_mat with this vec (thanks jnp broadcasting!)
         # (alphabet_size, alphabet_size, k_subst, k_equl) / (k_subst, k_equl)
-        out = subst_rate_mat / R_times_pi
+        out = subst_rate_mat / norm_factor
         return out
     
     
@@ -289,10 +323,10 @@ class LG_mixture(subst_base):
         return initialized_params, hparams
     
     
-    def logprobs_at_t(self, t, params_dict, hparams_dict):
+    def conditional_logprobs_at_t(self, t, params_dict, hparams_dict):
         """
-        ABOUT: calculate the logP(substitutions); multiply by counts
-               during training
+        ABOUT: calculate the conditional logP(x(t)|x(0)); could multiply by 
+               counts during training
         JITTED: yes
         WHEN IS THIS CALLED: every training loop, every timepoint
         OUTPUTS: logP(substitutions)-
@@ -303,7 +337,6 @@ class LG_mixture(subst_base):
         
         ### unpack extra hyperparameters
         equl_vecs = hparams_dict['equl_vecs']
-        # k_subst = hparams_dict['k_subst']
         k_subst = params_dict['subst_mix_logits'].shape[0]
         exch_mat = hparams_dict['exch_mat']
         
