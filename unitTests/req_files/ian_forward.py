@@ -23,9 +23,6 @@ from diffrax import diffeqsolve, ODETerm, Dopri5, PIDController, ConstantStepSiz
 
 import argparse
 
-# We hate NaNs
-from jax.config import config
-config.update("jax_debug_nans", True)
 
 # We replace zeroes and infinities with small numbers sometimes
 # It's sinful but that's life for you

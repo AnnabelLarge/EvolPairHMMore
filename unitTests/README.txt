@@ -1,4 +1,4 @@
-output on 4/1/24:
+output on 4/16/24:
 ==================
 TESTING counting in summarize_alignment
 [PASSED] correct counts of alignment events
@@ -16,5 +16,6 @@ TESTING batched GGI code from indel_models
 [PASSED] correct calculation: transition matrices for mixture of H20 models
 
 TESTING likelihood calculation in utils.training_testing_fns
-[PASSED] correct calculation of log likelihoods; marginalization over time
+Creating DataLoader for test set with ['FiveSamp']
+[PASSED] correct likelihood calculation for all single models
 [PASSED] correct recipe for adding mixture weights and logsumexp-ing

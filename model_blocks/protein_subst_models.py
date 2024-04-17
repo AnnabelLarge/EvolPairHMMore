@@ -56,7 +56,7 @@ universal order of dimensions:
 todo:
 =====
 - add a more manual mixture model that loads from multiple exchangeability 
-  matrices and fit the mixutre parameters (I don't plan on using it yet, but
+  matrices and fit the mixture components (I don't plan on using it yet, but
   does give me more flexibility in future runs)
 
 """
@@ -171,7 +171,7 @@ class subst_base:
         ### diag will be (k_subst, k_equl, alphabet_size) (k,l,i)
         diag = jnp.diagonal(subst_rate_mat, axis1=0, axis2=1)
         
-        ### equl_dists is (alphabet_size, k_equl)
+        ### equl_dists is (alphabet_size, k_equl) (i, l)
         ###    output is (k_subst, k_equl) (k,l)
         norm_factor = -jnp.einsum('kli, il -> kl', diag, equl_pi_mat)
         
@@ -259,8 +259,6 @@ class LG_mixture(subst_base):
               > DEFAULT: vector of 1s, length of k_subst
         
         hparams to pass on (or infer):
-            - k_subst
-              > DEFAULT: length of mixture logits vector
             - alphabet_size
             - exchangeability matrix
         """
@@ -296,14 +294,6 @@ class LG_mixture(subst_base):
             subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits, dtype=float)
         
         
-        ### HYPERPARAMETER: k_subst
-        # either provided already, or inferred from length of subst_mix_logits
-        if 'k_subst' not in provided_args:
-            k_subst = subst_mix_logits.shape[0]
-        else:
-            k_subst = argparse_obj.k_subst
-        
-        
         ### load exchangeabilities file
         file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
         with open(file_to_load,'rb') as f:
@@ -316,8 +306,7 @@ class LG_mixture(subst_base):
                               'subst_mix_logits': subst_mix_logits}
         
         # dictionary of hyperparameters
-        hparams = {'k_subst': k_subst,
-                   'alphabet_size': argparse_obj.alphabet_size,
+        hparams = {'alphabet_size': argparse_obj.alphabet_size,
                    'exch_mat': exch_mat}
         
         return initialized_params, hparams

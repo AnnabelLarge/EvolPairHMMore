@@ -294,9 +294,7 @@ class GGI_mixture(no_indel):
               > DEFAULT: vector of 1s, length of k_indel 
               
         hparams to pass on (or infer):
-            - k_indel
-              > DEFAULT: length of mixture logits vector
-            
+            - diffrax params (from argparse)
         """
         ### will use the transitionMatrix function from Ian
         provided_args = dir(argparse_obj)
@@ -341,13 +339,6 @@ class GGI_mixture(no_indel):
             indel_mix_logits = jnp.array(argparse_obj.indel_mix_logits, dtype=float)
         
         
-        ### HYPERPARAMETER: number of mixtures
-        if 'k_indel' not in provided_args:
-            k_indel = indel_mix_logits.shape[0]
-        else:
-            k_indel = argparse_obj.k_indel
-        
-        
         ### OUTPUT DICTIONARIES
         # parameters to fit with optax
         initialized_params = {'lam_transf': lam_transf,
@@ -357,8 +348,7 @@ class GGI_mixture(no_indel):
                               'indel_mix_logits': indel_mix_logits}
         
         # dictionary of hyperparameters
-        hparams = {'k_indel': k_indel,
-                   'diffrax_params': argparse_obj.diffrax_params}
+        hparams = {'diffrax_params': argparse_obj.diffrax_params}
         
         return initialized_params, hparams
     

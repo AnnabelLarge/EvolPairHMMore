@@ -59,6 +59,25 @@ def main():
     del params, hparams, model, equl_out, logequl_out
     
     
+    ### equl_deltaMixture
+    k_equl = 2
+    genkey, _ = jax.random.split(jax.random.key(0))
+    out_shape = (4, k_equl)
+    equl_vecs_transf = jax.random.normal(genkey, out_shape)
+    params = {'equl_vecs_transf': equl_vecs_transf}
+    hparams = {'alphabet_size': alphabet_size}
+    model = equl_deltaMixture()
+    
+    equl_out, logEqul_out =  model.equlVec_logprobs(params, hparams)
+    
+    # make sure all sampled distributions sum to 1
+    assert jnp.allclose(equl_out.sum(axis=0), jnp.ones(k_equl))
+    
+    # if you apply log to equl_out, should get the same result as from
+    #   logEqul_out
+    assert jnp.allclose(logEqul_out, jnp.log(equl_out))
+    
+    
     ### equl_dirichletMixture
     k_equl = 2
     params = {'dirichlet_shape_transf': jnp.array([[1,1,1,1],
@@ -72,3 +91,5 @@ def main():
     
     # make sure all sampled distributions sum to 1
     assert jnp.allclose(equl_out.sum(axis=0), jnp.ones(k_equl))
+    
+    

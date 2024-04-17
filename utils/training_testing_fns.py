@@ -8,7 +8,7 @@ Created on Mon Mar 11 20:30:15 2024
 
 ABOUT:
 ======
-
+training function and (related) eval function
 
 einsum dimension abbreviations:
 ===============================
@@ -44,10 +44,7 @@ universal order of dimensions:
 import jax
 from jax import numpy as jnp
 from jax.nn import log_softmax
-
-# We replace zeroes and infinities with small numbers sometimes
-# It's sinful but BOY DO I LOVE SIN
-smallest_float32 = jnp.finfo('float32').smallest_normal
+from utils.extra_utils import logsumexp_where
 
 
 ###############################################################################
@@ -55,38 +52,24 @@ smallest_float32 = jnp.finfo('float32').smallest_normal
 ###############################################################################
 def logsumexp_withZeros(x, axis):
     """
-    helper function that's basically a logsumexp that isn't affected by zeros
-    if the whole sum( exp(x) ) is zero, then also return zero (not log(0))
-    
-    see this about NaN's and jnp.where-
-    https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-
-      where-using-where:~:text=f32%5B1%2C3%5D%7B1%2C0%7D-,Gradients%20
-      contain%20NaN%20where%20using%20where,-%23
+    wrapper that returns zero if WHOLE logsumexp would result in zero 
+      (native behavior is to return -inf)
     """
-    zero_val_mask = jnp.where(x != 0,
+    # mask for tensor elements that are zero
+    nonzero_elems = jnp.where(x != 0,
                               1,
                               0)
     
-    exp_x = jnp.exp(x)
-    exp_x_masked = exp_x * zero_val_mask
-    sumexp_x = jnp.sum(exp_x_masked, axis=axis)
-    
-    logsumexp_x = jnp.log(jnp.where(sumexp_x > 0., 
-                                    sumexp_x, 
-                                    1.))
-    return logsumexp_x
-
-
-# use this to logsumexp across timepoints; like a reimann sum to approx
-#   true marginal
-def marginalize_across_t(logprob_mat, num_timepoints, norm_axis=0):
-    """
-    P(A) = sum_t[ P(A|t) P(t) c ] dt
-    logP(A) = logsumexp(logP(A|t) + logP(t) + log(c) + log(dt))
-    """
-    logsumexp_probs = logsumexp_withZeros(logprob_mat, 
-                                          axis=norm_axis)
-    return logsumexp_probs
+    # use logsumexp_where only where whole sum would not be zero; otherwise,
+    #  return zero
+    #  note: if there's any weird point where gradient is -inf or inf, it's
+    #  probably this causing a problem...
+    out = jnp.where(nonzero_elems.sum(axis=axis) > 0,
+                    logsumexp_where(a=x,
+                                    axis=axis,
+                                    where=nonzero_elems),
+                    0)
+    return out
 
 
 
@@ -127,30 +110,47 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     equl_model, subst_model, indel_model = pairHMM
     del pairHMM
     
+    # need r, the geometric grid step for generating timepoints
+    r = hparams_dict['t_grid_step']
+    
     # if equlibrium distribution is a dirichlet mixture, will need a random
     # key for it
     hparams_dict['dirichlet_samp_key'] = jax.random.split(training_rngkey, 2)[1]
     
     # everything in this function is tracked with jax value_and_grad
     def apply_model(params_toTrack):
-        #########################################################
-        ### 1: CALCULATE LOG-PROBABILITIES PER t, PER MIXTURE   #
-        #########################################################
-        # retrieve equlibrium distribution vector, logP(emissions/omissions)
-        #   this does NOT depend on time, so do this outside the time loop
+        ##############################################
+        ### 1.1: logP(insertion) and logP(deletions) #
+        ##############################################
+        ### 1.1.1: retrieve equlibrium distribution vector; this does NOT 
+        ###        depend on time
         equl_vecs, logprob_equl = equl_model.equlVec_logprobs(params_toTrack,
                                                               hparams_dict)
         
         # overwrite equl_vecs entry in the hparams dictionary
         hparams_dict['equl_vecs'] = equl_vecs
         
-        # this calculates logprob at one time, t; vmap this over t_arr
+        ### 1.1.2: multiply counts by logprobs; this is logP 
+        ###        PER EQUILIBRIUM DISTRIBUTION
+        # logP(observed insertions); dim: (batch, k_equl)
+        ins_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                         insCounts_persamp,
+                                         logprob_equl)
+        
+        # logP(deletions from ancestor sequence); dim: (batch, k_equl)
+        del_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                         delCounts_persamp,
+                                         logprob_equl)
+        
+        
+        ##################################################################
+        ### 1.2: logP(substitutions/matches) and logP(state transitions) #
+        ##################################################################
+        # this function calculates logprob at one time, t; vmap this over t_arr
         def apply_model_at_t(t):
-            ######################################
-            ### 1.1: LOG PROBABILITIES AT TIME t #
-            ######################################
+            ### 1.2.1: get the emission/transition matrices
             # retrieve substitution logprobs
-            logprob_substitution_at_t = subst_model.logprobs_at_t(t, 
+            logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
                                                                   params_toTrack, 
                                                                   hparams_dict)
             
@@ -159,79 +159,45 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                                                 params_toTrack, 
                                                                 hparams_dict)
             
-            ###############################################################
-            ### 1.2: multiply counts by logprobs (let einsum handle this) #
-            ###############################################################
+            ### 1.2.2: multiply counts by logprobs
             # logP(observed substitutions)
-            logP_counts_sub = jnp.einsum('bij,ijxy->bxy', 
-                                         subCounts_persamp,
-                                         logprob_substitution_at_t)
-            
-            # logP(observed insertions)
-            logP_counts_ins = jnp.einsum('bi,iy->by',
-                                         insCounts_persamp,
-                                         logprob_equl)
-            
-            # logP(omitted deletions)
-            logP_counts_dels = jnp.einsum('bi,iy->by',
-                                          delCounts_persamp,
-                                          logprob_equl)
+            logP_counts_sub_at_t = jnp.einsum('bij,ijxy->bxy', 
+                                              subCounts_persamp,
+                                              logprob_substitution_at_t)
             
             # logP(observed transitions)
-            logP_counts_trans = jnp.einsum('bmn,mnz->bz',
-                                           transCounts_persamp,
-                                           logprob_transition_at_t)
+            logP_counts_trans_at_t = jnp.einsum('bmn,mnz->bz',
+                                                transCounts_persamp,
+                                                logprob_transition_at_t)
+            
+            
+            ### 1.2.3: also need a per-time constant for later 
+            ###        marginalization over time
+            marg_const_at_t = jnp.log(t) - ( t / (r-1) ) 
+            
+            
+            return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                    marg_const_at_t)
         
-            # return tuple of these four to deal with... later
-            return (logP_counts_sub, logP_counts_ins, 
-                    logP_counts_dels, logP_counts_trans)
-        
-        ### vmap over the time array; return log probabilities PER TIME POINT,
-        ###   and PER MIXTURE MODEL
+        ### 1.2.3: vmap over the time array; return log probabilities 
+        ###        PER TIME POINT and PER MIXTURE MODEL
         vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
-        tuple_logprobs_perTime_perMix = vmapped_apply_model_at_t(t_arr)
-        num_timepoints = len(t_arr)
+        out = vmapped_apply_model_at_t(t_arr)
         
-        ### unpack tuples; all times will be placed at dim0
         # (time, batch, k_subst, k_equl)
-        sub_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[0]
-        
-        # (time, batch, k_equl)
-        ins_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[1]
-        
-        # (time, batch, k_equl)
-        del_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[2]
+        sub_logprobs_perTime_perMix = out[0]
         
         # (time, batch, k_indel)
-        trans_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[3]
+        trans_logprobs_perTime_perMix = out[1]
+        
+        # (time,)
+        marginalization_consts = out[2]
         
         
-        ################################################
-        ### 2: SUM ACROSS TIME ARRAY, MIXTURE MODELS   #
-        ################################################
-        ### 2.1: marginalize across t
-        # (batch, k_subst, k_equl)
-        sub_logprobs_perMix = marginalize_across_t(sub_logprobs_perTime_perMix, 
-                                                   num_timepoints,
-                                                   norm_axis=0)
-        
-        # (batch, k_equl)
-        ins_logprobs_perMix = marginalize_across_t(ins_logprobs_perTime_perMix, 
-                                                   num_timepoints,
-                                                   norm_axis=0)
-        
-        # (batch, k_equl)
-        del_logprobs_perMix = marginalize_across_t(del_logprobs_perTime_perMix, 
-                                                   num_timepoints,
-                                                   norm_axis=0)
-        
-        # (batch, k_indel)
-        trans_logprobs_perMix = marginalize_across_t(trans_logprobs_perTime_perMix, 
-                                                     num_timepoints,
-                                                     norm_axis=0)
-        
-        
-        ### 2.2: log-softmax the mixture logits (if available)
+        ##################################
+        ### 1.3: sum over mixture models #
+        ##################################
+        ### 1.3.1: log-softmax the mixture logits (if available)
         # get mixture logits from hparams OR pass in a dummy vector of 1
         # (k_subst,)
         subst_mix_logits = params_toTrack.get('subst_mix_logits', jnp.array([1]))
@@ -247,22 +213,23 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         equl_mix_logprobs = log_softmax(equl_mix_logits)
         indel_mix_logprobs = log_softmax(indel_mix_logits)
         
-        ### 2.3: for substitution model, take care of substitution mixtures 
-        ###      THEN equlibrium mixtures 
-        # k_subs is at dim=1 (middle one out of three dimensions)
-        with_subst_mix_weights = (sub_logprobs_perMix +
-                                  jnp.expand_dims(subst_mix_logprobs, (0,2)))
-        logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=1)
         
-        # k_equl is now at dim=1 (last one out of three dimensions, but middle 
-        #   dimension was removed, so now it's last out of two dimensions)
+        ### 1.3.2: for substitution model, take care of substitution mixtures 
+        ###        THEN equlibrium mixtures 
+        # k_subs is at dim=2 (third out of three dimensions)
+        with_subst_mix_weights = (sub_logprobs_perTime_perMix +
+                                  jnp.expand_dims(subst_mix_logprobs, (0,1,3)))
+        logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=2)
+        
+        # k_equl is now at dim=2 (last one out of four dimensions, but middle 
+        #   dimension was removed, so now it's last out of three dimensions)
         with_equl_mix_weights = (logsumexp_along_k_subst +
-                                 jnp.expand_dims(equl_mix_logprobs, 0))
-        logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
+                                 jnp.expand_dims(equl_mix_logprobs, (0,1)))
+        logP_subs_perTime = logsumexp_withZeros(with_equl_mix_weights, axis=2)
         
         
-        ### 2.4: logP(emissions at insert sites) and 
-        ###      logP(omissions at delete sites)
+        ### 1.3.3: logP(emissions at insert sites) and 
+        ###        logP(removed substrings from delete sites)
         # insertions
         with_ins_mix_weights = (ins_logprobs_perMix + 
                                 jnp.expand_dims(equl_mix_logprobs, 0))
@@ -274,18 +241,37 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
         
         
-        ### 2.5: logP(transitions)
-        with_indel_mix_weights = (trans_logprobs_perMix + 
-                                  jnp.expand_dims(indel_mix_logprobs, 0))
-        logP_trans = logsumexp_withZeros(with_indel_mix_weights, axis=1)
+        ### 1.3.4: logP(transitions)
+        # k_indel is at dim=2 (third out of three dimensions)
+        with_indel_mix_weights = (trans_logprobs_perTime_perMix + 
+                                  jnp.expand_dims(indel_mix_logprobs, (0,1)))
+        logP_trans_perTime = logsumexp_withZeros(with_indel_mix_weights, 
+                                                 axis=2)
         
         
-        # sum all and return
-        logP_perSamp = logP_subs + logP_ins + logP_dels + logP_trans
+        ##########################################
+        ### 1.4: marginalize over mixture models #
+        ##########################################
+        ### 1.4.1: add all independent logprobs
+        # (time, batch)
+        logP_perTime = (logP_subs_perTime +
+                        jnp.expand_dims(logP_ins,0) +
+                        jnp.expand_dims(logP_dels,0) +
+                        logP_trans_perTime)
         
-        mean_alignment_logprob = jnp.mean(logP_perSamp)
-        return -mean_alignment_logprob
+        ### add marginalization_consts (time,)
+        logP_perTime_withConst = (logP_perTime +
+                                  jnp.expand_dims(marginalization_consts, 1))
         
+        ### 1.4.3: logsumexp across time dimension (dim0)
+        logP = logsumexp_withZeros(logP_perTime_withConst,
+                                   axis=0)
+        
+        ### 1.4.4: final loss is -mean(logP) of this
+        loss = -jnp.mean(logP)
+        
+        return loss
+    
     
     ### set up the grad functions, based on above apply function
     ggi_grad_fn = jax.value_and_grad(apply_model, has_aux=False)
@@ -294,7 +280,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     loss, all_grads = ggi_grad_fn(params_dict)
     
     return loss, all_grads
-
+    
 
 
 def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
@@ -316,8 +302,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     outputs:
         > loss: negative mean log likelihood
         > logprobs_persamp: different logprobs for each sample
-    """    
-    
+    """   
     # unpack counts tuple
     subCounts_persamp = all_counts[0] 
     insCounts_persamp = all_counts[1] 
@@ -329,29 +314,46 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     equl_model, subst_model, indel_model = pairHMM
     del pairHMM
     
+    # need r, the geometric grid step for generating timepoints
+    r = hparams_dict['t_grid_step']
+    
     # if equlibrium distribution is a dirichlet mixture, will need a random
     # key for it
     hparams_dict['dirichlet_samp_key'] = jax.random.split(eval_rngkey, 2)[1]
     
     
-    #########################################################
-    ### 1: CALCULATE LOG-PROBABILITIES PER t, PER MIXTURE   #
-    #########################################################
-    # retrieve equlibrium distribution vector, logP(emissions/omissions)
-    #   this does NOT depend on time, so do this outside the time loop
+    ##############################################
+    ### 1.1: logP(insertion) and logP(deletions) #
+    ##############################################
+    ### 1.1.1: retrieve equlibrium distribution vector; this does NOT 
+    ###        depend on time
     equl_vecs, logprob_equl = equl_model.equlVec_logprobs(params_dict,
                                                           hparams_dict)
     
     # overwrite equl_vecs entry in the hparams dictionary
     hparams_dict['equl_vecs'] = equl_vecs
     
-    # this calculates logprob at one time, t; vmap this over t_arr
+    ### 1.1.2: multiply counts by logprobs; this is logP 
+    ###        PER EQUILIBRIUM DISTRIBUTION
+    # logP(observed insertions); dim: (batch, k_equl)
+    ins_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                     insCounts_persamp,
+                                     logprob_equl)
+    
+    # logP(deletions from ancestor sequence); dim: (batch, k_equl)
+    del_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                     delCounts_persamp,
+                                     logprob_equl)
+    
+    
+    ##################################################################
+    ### 1.2: logP(substitutions/matches) and logP(state transitions) #
+    ##################################################################
+    # this function calculates logprob at one time, t; vmap this over t_arr
     def apply_model_at_t(t):
-        ######################################
-        ### 1.1: LOG PROBABILITIES AT TIME t #
-        ######################################
+        ### 1.2.1: get the emission/transition matrices
         # retrieve substitution logprobs
-        logprob_substitution_at_t = subst_model.logprobs_at_t(t, 
+        logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
                                                               params_dict, 
                                                               hparams_dict)
         
@@ -360,81 +362,45 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                                             params_dict, 
                                                             hparams_dict)
         
-        
-        ###############################################################
-        ### 1.2: multiply counts by logprobs (let einsum handle this) #
-        ###############################################################
+        ### 1.2.2: multiply counts by logprobs
         # logP(observed substitutions)
-        logP_counts_sub = jnp.einsum('bij,ijxy->bxy', 
-                                     subCounts_persamp,
-                                     logprob_substitution_at_t)
-        
-        # logP(observed insertions)
-        logP_counts_ins = jnp.einsum('bi,iy->by',
-                                     insCounts_persamp,
-                                     logprob_equl)
-        
-        # logP(omitted deletions)
-        logP_counts_dels = jnp.einsum('bi,iy->by',
-                                      delCounts_persamp,
-                                      logprob_equl)
+        logP_counts_sub_at_t = jnp.einsum('bij,ijxy->bxy', 
+                                          subCounts_persamp,
+                                          logprob_substitution_at_t)
         
         # logP(observed transitions)
-        logP_counts_trans = jnp.einsum('bmn,mnz->bz',
-                                       transCounts_persamp,
-                                       logprob_transition_at_t)
+        logP_counts_trans_at_t = jnp.einsum('bmn,mnz->bz',
+                                            transCounts_persamp,
+                                            logprob_transition_at_t)
         
-        # return tuple of these four to deal with... later
-        return (logP_counts_sub, logP_counts_ins, 
-                logP_counts_dels, logP_counts_trans)
+        
+        ### 1.2.3: also need a per-time constant for later 
+        ###        marginalization over time
+        marg_const_at_t = jnp.log(t) - ( t / (r-1) ) 
+        
+        
+        return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                marg_const_at_t)
     
-    ### vmap over the time array; return log probabilities PER TIME POINT,
-    ###   and PER MIXTURE MODEL
+    ### 1.2.3: vmap over the time array; return log probabilities 
+    ###        PER TIME POINT and PER MIXTURE MODEL
     vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
-    tuple_logprobs_perTime_perMix = vmapped_apply_model_at_t(t_arr)
-    num_timepoints = len(t_arr)
+    out = vmapped_apply_model_at_t(t_arr)
     
-    
-    ### unpack tuples; all times will be placed at dim0
     # (time, batch, k_subst, k_equl)
-    sub_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[0]
-    
-    # (time, batch, k_equl)
-    ins_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[1]
-    
-    # (time, batch, k_equl)
-    del_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[2]
+    sub_logprobs_perTime_perMix = out[0]
     
     # (time, batch, k_indel)
-    trans_logprobs_perTime_perMix = tuple_logprobs_perTime_perMix[3]
+    trans_logprobs_perTime_perMix = out[1]
+    
+    # (time,)
+    marginalization_consts = out[2]
     
     
-    ################################################
-    ### 2: SUM ACROSS TIME ARRAY, MIXTURE MODELS   #
-    ################################################
-    ### 2.1: marginalize across t
-    # (batch, k_subst, k_equl)
-    sub_logprobs_perMix = marginalize_across_t(sub_logprobs_perTime_perMix, 
-                                               num_timepoints,
-                                               norm_axis=0)
-    
-    # (batch, k_equl)
-    ins_logprobs_perMix = marginalize_across_t(ins_logprobs_perTime_perMix, 
-                                               num_timepoints,
-                                               norm_axis=0)
-    
-    # (batch, k_equl)
-    del_logprobs_perMix = marginalize_across_t(del_logprobs_perTime_perMix, 
-                                               num_timepoints,
-                                               norm_axis=0)
-    
-    # (batch, k_indel)
-    trans_logprobs_perMix = marginalize_across_t(trans_logprobs_perTime_perMix, 
-                                                 num_timepoints,
-                                                 norm_axis=0)
-    
-    
-    ### 2.2: log-softmax the mixture logits (if available)
+    ##################################
+    ### 1.3: sum over mixture models #
+    ##################################
+    ### 1.3.1: log-softmax the mixture logits (if available)
     # get mixture logits from hparams OR pass in a dummy vector of 1
     # (k_subst,)
     subst_mix_logits = params_dict.get('subst_mix_logits', jnp.array([1]))
@@ -451,22 +417,22 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     indel_mix_logprobs = log_softmax(indel_mix_logits)
     
     
-    ### 2.3: for substitution model, take care of substitution mixtures 
-    ###      THEN equlibrium mixtures 
-    # k_subs is at dim=1 (middle one out of three dimensions)
-    with_subst_mix_weights = (sub_logprobs_perMix +
-                              jnp.expand_dims(subst_mix_logprobs, (0,2)))
-    logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=1)
+    ### 1.3.2: for substitution model, take care of substitution mixtures 
+    ###        THEN equlibrium mixtures 
+    # k_subs is at dim=2 (third out of three dimensions)
+    with_subst_mix_weights = (sub_logprobs_perTime_perMix +
+                              jnp.expand_dims(subst_mix_logprobs, (0,1,3)))
+    logsumexp_along_k_subst = logsumexp_withZeros(with_subst_mix_weights, axis=2)
     
-    # k_equl is now at dim=1 (last one out of three dimensions, but middle 
-    #   dimension was removed, so now it's last out of two dimensions)
+    # k_equl is now at dim=2 (last one out of four dimensions, but middle 
+    #   dimension was removed, so now it's last out of three dimensions)
     with_equl_mix_weights = (logsumexp_along_k_subst +
-                             jnp.expand_dims(equl_mix_logprobs, 0))
-    logP_subs = logsumexp_withZeros(with_equl_mix_weights, axis=1)
+                             jnp.expand_dims(equl_mix_logprobs, (0,1)))
+    logP_subs_perTime = logsumexp_withZeros(with_equl_mix_weights, axis=2)
     
     
-    ### 2.4: logP(emissions at insert sites) and 
-    ###      logP(omissions at delete sites)
+    ### 1.3.3: logP(emissions at insert sites) and 
+    ###        logP(removed substrings from delete sites)
     # insertions
     with_ins_mix_weights = (ins_logprobs_perMix + 
                             jnp.expand_dims(equl_mix_logprobs, 0))
@@ -478,26 +444,34 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
     
     
-    ### 2.5: logP(transitions)
-    with_indel_mix_weights = (trans_logprobs_perMix + 
-                              jnp.expand_dims(indel_mix_logprobs, 0))
-    logP_trans = logsumexp_withZeros(with_indel_mix_weights, axis=1)
+    ### 1.3.4: logP(transitions)
+    # k_indel is at dim=2 (third out of three dimensions)
+    with_indel_mix_weights = (trans_logprobs_perTime_perMix + 
+                              jnp.expand_dims(indel_mix_logprobs, (0,1)))
+    logP_trans_perTime = logsumexp_withZeros(with_indel_mix_weights, 
+                                             axis=2)
     
     
-    # sum all and return
-    total_logprobs_persamp = logP_subs + logP_ins + logP_dels + logP_trans
+    ################################
+    ### 1.4: marginalize over time #
+    ################################
+    ### 1.4.1: add all independent logprobs
+    # (time, batch)
+    logP_perTime = (logP_subs_perTime +
+                    jnp.expand_dims(logP_ins,0) +
+                    jnp.expand_dims(logP_dels,0) +
+                    logP_trans_perTime)
     
-    loss = -jnp.mean(total_logprobs_persamp)
+    ### add marginalization_consts (time, batch)
+    logP_perTime_withConst = (logP_perTime +
+                              jnp.expand_dims(marginalization_consts, 1))
     
-
-    ##############################################
-    ### 3: RETURN LOSS AND INDIVIDUAL LOGPROBS   #
-    ##############################################
-    # isolate different terms of the loss
-    logprobs_persamp = jnp.concatenate([jnp.expand_dims(logP_subs, 1),
-                                        jnp.expand_dims((logP_subs + logP_ins), 1),
-                                        jnp.expand_dims(logP_trans, 1),
-                                        jnp.expand_dims(total_logprobs_persamp, 1)],
-                                       axis=1)
-                                          
-    return (loss, logprobs_persamp)
+    ### 1.4.3: logsumexp across time dimension (dim0)
+    logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
+                                       axis=0)
+    
+    ### 1.4.4: final loss is -mean(logP_perSamp) of this
+    loss = -jnp.mean(logP_perSamp)
+    
+    
+    return(loss, logP_perSamp)

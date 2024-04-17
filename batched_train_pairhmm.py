@@ -219,6 +219,9 @@ def train_batch(args, output_from_loading_func):
     else:
         hparams['gap_tok'] = args.gap_tok
     
+    # add grid step to hparams dictionary; needed for marginaling over time
+    hparams['t_grid_step']= args.t_grid_step
+    
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
     
@@ -409,10 +412,7 @@ def train_batch(args, output_from_loading_func):
                 meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
                 
                 # add loss terms
-                meta_df_forBatch['logP(ONLY_emission_at_subst)'] = logprob_per_sample[:, 0]
-                meta_df_forBatch['logP(ONLY_emissions)'] = logprob_per_sample[:, 1]
-                meta_df_forBatch['logP(ONLY_transitions)'] = logprob_per_sample[:, 2]
-                meta_df_forBatch['logP(anc, desc, align)'] = logprob_per_sample[:, 3]
+                meta_df_forBatch['logP(A_t,A_0|model)'] = logprob_per_sample
                 
                 eval_df_lst.append(meta_df_forBatch)
 

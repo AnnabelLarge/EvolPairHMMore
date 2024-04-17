@@ -23,8 +23,8 @@ medium:
 far future:
 -----------
 For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new rate matrix for my specific pfam dataset?
-  https://github.com/songlab-cal/CherryML
+  CherryML to calculate a new exchangeability matrix for my specific pfam 
+  dataset? https://github.com/songlab-cal/CherryML
 
 """
 import os
@@ -196,6 +196,9 @@ def train_pairhmm(args):
     else:
         hparams['gap_tok'] = args.gap_tok
     
+    # add grid step to hparams dictionary; needed for marginaling over time
+    hparams['t_grid_step']= args.t_grid_step
+    
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
     
@@ -214,7 +217,9 @@ def train_pairhmm(args):
     jitted_eval_fn = jax.jit(eval_fn)
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                             static_argnames='max_seq_len')
+                                             static_argnames=['max_seq_len',
+                                                              'alphabet_size',
+                                                              'gap_tok'])
         
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 9999
@@ -223,7 +228,6 @@ def train_pairhmm(args):
     # when to save a model's parameters
     best_epoch = -1
     best_train_loss = 9999
-    
     
     for epoch_idx in tqdm(range(args.num_epochs)):
         # default behavior is to not save model parameters or 
@@ -241,7 +245,7 @@ def train_pairhmm(args):
             if not args.have_precalculated_counts:
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = training_global_max_seqlen)
-                allCounts = summarize_alignment(batch, 
+                allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
                                                 gap_tok=hparams['gap_tok'])
@@ -313,7 +317,7 @@ def train_pairhmm(args):
                 if val.shape == (1,):
                     OUT_forLoad[key] = val.item()
                 else:
-                    OUT_forLoad[key] = np.array(val)
+                    OUT_forLoad[key] = np.array(val).tolist()
             
             # undo any possible parameter transformations and add to 
             #   1.) the dictionary of all possible things needed to load a 
@@ -356,7 +360,7 @@ def train_pairhmm(args):
             if not args.have_precalculated_counts:
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = test_global_max_seqlen)
-                allCounts = summarize_alignment(batch, 
+                allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
                                                 gap_tok=hparams['gap_tok'])
@@ -388,10 +392,7 @@ def train_pairhmm(args):
                 meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
                 
                 # add loss terms
-                meta_df_forBatch['logP(ONLY_emission_at_subst)'] = logprob_per_sample[:, 0]
-                meta_df_forBatch['logP(ONLY_emissions)'] = logprob_per_sample[:, 1]
-                meta_df_forBatch['logP(ONLY_transitions)'] = logprob_per_sample[:, 2]
-                meta_df_forBatch['logP(anc, desc, align)'] = logprob_per_sample[:, 3]
+                meta_df_forBatch['logP(A_t,A_0|model)'] = logprob_per_sample
                 
                 eval_df_lst.append(meta_df_forBatch)
 
@@ -456,15 +457,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='train_pairhmm')
     
     
-    # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # # config files required to run
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    args.config_file = 'CONFIG_equlMixr3.json'
     
     
     with open(args.config_file, 'r') as f:

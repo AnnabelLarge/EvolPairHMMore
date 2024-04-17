@@ -174,6 +174,9 @@ def eval_pairhmm(args):
     else:
         hparams['gap_tok'] = args.gap_tok
     
+    # add grid step to hparams dictionary; needed for marginaling over time
+    hparams['t_grid_step']= args.t_grid_step
+    
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
     
@@ -189,6 +192,7 @@ def eval_pairhmm(args):
                                               static_argnames='max_seq_len')
     
     eval_df_lst = []
+    eval_test_loss = 0
     for batch_idx,batch in enumerate(test_dl):
         ### 3.1: EVAL ON ALL SAMPLES IN THE BATCH
         # fold in epoch_idx and batch_idx for eval 
@@ -217,19 +221,20 @@ def eval_pairhmm(args):
                               hparams_dict = hparams,
                               eval_rngkey = rngkey_for_eval)
     
-        _, logprob_per_sample = out
+        batch_test_loss, logprob_per_sample = out
+        
+        # add to eval_test_loss
+        eval_test_loss += batch_test_loss
+        
     
         ### 3.2: RECORD RESULTS IN DATAFRAME
         # get the batch sample labels, associated metadata
         eval_sample_idxes = batch[-1]
         meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
-    
+        
         # add loss terms
-        meta_df_forBatch['logP(ONLY_emission_at_subst)'] = logprob_per_sample[:, 0]
-        meta_df_forBatch['logP(ONLY_emissions)'] = logprob_per_sample[:, 1]
-        meta_df_forBatch['logP(ONLY_transitions)'] = logprob_per_sample[:, 2]
-        meta_df_forBatch['logP(anc, desc, align)'] = logprob_per_sample[:, 3]
-    
+        meta_df_forBatch['logP(A_t,A_0|model)'] = logprob_per_sample
+                
         eval_df_lst.append(meta_df_forBatch)
     
     
@@ -239,10 +244,12 @@ def eval_pairhmm(args):
         eval_df.to_csv(g, sep='\t')
     
     # also output averge loss to a row of a file; can concat from all runs later
-    ave_test_loss = -eval_df['logP(anc, desc, align)'].mean()
+    ave_epoch_test_loss = float(eval_test_loss/len(test_dl))
+    del eval_test_loss
+    
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.eval_runname}\t') 
-        g.write(f'{ave_test_loss}\n')
+        g.write(f'{ave_epoch_test_loss}\n')
 
 
 

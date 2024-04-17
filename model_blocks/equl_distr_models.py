@@ -13,11 +13,11 @@ Methods to generate equilibrium distributions:
 1. equl_base
    > single equlibrium vector, infer from given data
 
-2. equl_dirichletMixture
-   > mixture model, sample from a dirichlet distribution
+2. equl_deltaMixture
+   > mixture model, assume delta priors over the different equilibrium vectors
 
-3. equl_mixture
-   > mixture model, manually provide equilibrium distributions to test
+3. equl_dirichletMixture
+   > mixture model, sample equilibrium vectors from a dirichlet prior
 
 4. no_equl
    > placeholder so that training script will run, but emissions/omissions
@@ -53,7 +53,7 @@ universal order of dimensions:
 """
 import jax
 from jax import numpy as jnp
-from jax.nn import softmax
+from jax.nn import softmax, log_softmax
 import numpy as np
 
 # We replace zeroes and infinities with small numbers sometimes
@@ -155,6 +155,102 @@ class equl_base(no_equl):
         return (equl_vec, logprob_equl)
 
 
+###############################################################################
+### mixture model: sample from a delta distribution   #########################
+###############################################################################
+class equl_deltaMixture(no_equl):
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit: 
+            - equl_vecs_transf (DEFAULT: init from jax.random.normal)
+            - equl_mix_logits (DEFAULT: vector of ones)
+        """
+        provided_args = dir(argparse_obj)
+        
+        ### PARAMETER: equl_vecs
+        # if not provided, generate from jax.random.normal with the same rng key
+        if 'equl_vecs_transf' not in provided_args:
+            genkey, _ = jax.random.split(jax.random.key(argparse_obj.rng_seednum))
+            out_shape = (argparse_obj.alphabet_size, argparse_obj.k_equl)
+            equl_vecs_transf = jax.random.normal(genkey, out_shape)
+        
+        # if provided, just use what's provided
+        else:
+            equl_vecs_transf = jax.array(argparse_obj.equl_vecs_transf)
+        
+        
+        ### PARAMETER: mixture logits
+        # if not provided, generate a logits vector of ones
+        if 'equl_mix_logits' not in provided_args:
+            equl_mix_logits = jnp.ones(argparse_obj.k_equl)
+        
+        # if provided, just use what's provided
+        else:
+            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
+        
+        
+        ### OUTPUT DICTIONARIES
+        # dictionary of parameters
+        initialized_params = {'equl_vecs_transf': equl_vecs_transf,
+                              'equl_mix_logits': equl_mix_logits}
+        
+        # dictionary of hyperparameters
+        hparams = dict()
+        
+        return initialized_params, hparams
+    
+    
+    def equlVec_logprobs(self, params_dict, hparams_dict):
+        """
+        ABOUT: calculate the equilibrium distribution; return this and 
+               logP(emission/omission) at indel sites (to multiply by 
+               indel counts during training)
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration
+        OUTPUTS: 
+            - equl_vec: softmax(equl_vecs_transf)
+            - logprob_equl: log_softmax(equl_vecs_transf)
+        """
+        # equilibrium distribution of amino acids
+        equl_vecs_transf = params_dict['equl_vecs_transf']
+        equl_vec = softmax(equl_vecs_transf, axis=0)
+        logprob_equl = log_softmax(equl_vecs_transf, axis=0)
+        return (equl_vec, logprob_equl) 
+
+
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### unpack parameters
+        equl_vecs_transf = params_dict['equl_vecs_transf']
+        equl_mix_logits = params_dict['equl_mix_logits']
+
+        
+        ### undo the domain transformation
+        equl_vecs = softmax(equl_vecs_transf, axis=0)
+        equl_mix_params = softmax(equl_mix_logits)
+        
+        # also turn them into regular lists, for writing JSON
+        equl_vecs = np.array(equl_vecs).tolist()
+        equl_mix_params = np.array(equl_mix_params).tolist()
+        
+        
+        ### add to parameter dictionary
+        out_dict = {}
+        out_dict['equl_vecs'] = equl_vecs
+        out_dict['equl_mix_params'] = equl_mix_params
+        
+        return out_dict
+
 
 ###############################################################################
 ### mixture model: sample from a dirichlet distribution   #####################
@@ -175,9 +271,6 @@ class equl_dirichletMixture(no_equl):
             - equl_mix_logits
               > DEFAULT: vector of ones
               
-        hparams to pass on (or infer): 
-            - k_equl
-              > DEFAULT: length of equl_mix_logits
         """
         provided_args = dir(argparse_obj)
         
@@ -215,21 +308,13 @@ class equl_dirichletMixture(no_equl):
             equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits, dtype=float)
 
         
-        ### HYPERPARAMETERS: k_equl
-        # either provided already, or inferred from current inputs
-        if 'k_equl' not in provided_args:
-            k_equl = equl_mix_logits.shape[0]
-        else:
-            k_equl = argparse_obj.k_equl
-            
-        
         ### OUTPUT DICTIONARIES
         # dictionary of parameters
         initialized_params = {'equl_mix_logits': equl_mix_logits,
                               'dirichlet_shape_transf':dirichlet_shape_transf}
         
         # dictionary of hyperparameters
-        hparams = {'k_equl': k_equl}
+        hparams = dict()
         
         return initialized_params, hparams
     
@@ -259,7 +344,7 @@ class equl_dirichletMixture(no_equl):
         
         ### sample equl_vecs from dirichlet distribution
         # undo domain transformation with softmax across dim0
-        dirichlet_shape = softmax(dirichlet_shape_transf)
+        dirichlet_shape = softmax(dirichlet_shape_transf, axis=0)
         
         # replace zeros with small numbers
         dirichlet_shape = jnp.where(dirichlet_shape !=0, 
@@ -293,7 +378,7 @@ class equl_dirichletMixture(no_equl):
         
         ### undo the domain transformation
         equl_mix_params = softmax(equl_mix_logits)
-        dirichlet_shape = softmax(dirichlet_shape_transf)
+        dirichlet_shape = softmax(dirichlet_shape_transf, axis=0)
         
         # also turn them into regular numpy arrays, for writing JSON
         equl_mix_params = np.array(equl_mix_params).tolist()
@@ -347,97 +432,3 @@ class equl_dirichletMixture(no_equl):
         Sigma = (1/alpha) * (1 - 2/K) + (1/K**2) * jnp.sum(1/alpha)
         a = mu + jnp.sqrt(Sigma) * n
         return softmax(a)
-
-
-
-###############################################################################
-### mixture model: manually provide equilibrium distributions to test   #######
-###############################################################################
-class equl_mixture(no_equl):
-    def initialize_params(self, argparse_obj):
-        """
-        ABOUT: return (possibly transformed) parameters
-        JITTED: no
-        WHEN IS THIS CALLED: once, upon model instantiation
-        OUTPUTS: dictionary of initial parameters for optax (if any)
-        
-        params to fit: 
-            - equl_mix_logits (DEFAULT: vector of ones)
-        hparams to pass on (or infer): 
-            - k_equl (DEFAULT: length of equl_mix_logits)
-        """
-        provided_args = dir(argparse_obj)
-        
-        ### PARAMETER: mixture logits
-        # if not provided, generate a logits vector of ones
-        if 'equl_mix_logits' not in provided_args:
-            equl_mix_logits = jnp.ones(argparse_obj.k_equl)
-        
-        # if provided, just use what's provided
-        else:
-            equl_mix_logits = jnp.array(argparse_obj.equl_mix_logits)
-        
-        
-        ### HYPERPARAMETERS: k_equl
-        # either provided already, or inferred from current inputs
-        if 'k_equl' not in provided_args:
-            k_equl = equl_mix_logits.shape[0]
-        else:
-            k_equl = argparse_obj.k_equl
-        
-        
-        ### OUTPUT DICTIONARIES
-        # dictionary of parameters
-        initialized_params = {'equl_mix_logits': equl_mix_logits}
-        
-        # dictionary of hyperparameters
-        hparams = {'k_equl': k_equl}
-        
-        return initialized_params, hparams
-    
-    
-    def equlVec_logprobs(self, params_dict, hparams_dict):
-        """
-        ABOUT: calculate the equilibrium distribution; return this and 
-               logP(emission/omission) at indel sites (to multiply by 
-               indel counts during training)
-        JITTED: yes
-        WHEN IS THIS CALLED: every training loop iteration
-        OUTPUTS: 
-            - equl_vec: equilibrium distributions manually passed in
-            - logprob_equl: logP(emission/omission)
-        """
-        # equilibrium distribution of amino acids
-        equl_vec = hparams_dict['equl_vecs']
-        equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, 1)
-        logprob_equl = jnp.log(equl_vec_noZeros)
-        return (equl_vec, logprob_equl) 
-
-
-    def undo_param_transform(self, params_dict):
-        """
-        ABOUT: if any parameters have domain changes, undo those
-        JITTED: no
-        WHEN IS THIS CALLED: when writing params to JSON file
-        OUTPUTS: parameter dictionary, with transformed params
-        """
-        out_dict = copy.deepcopy(params_dict)
-        
-        ### unpack parameters
-        equl_mix_logits = out_dict['equl_mix_logits']
-        
-        # remove transformed versions from dictionary
-        del out_dict['equl_mix_logits']
-        
-        
-        ### undo the domain transformation
-        equl_mix_params = softmax(equl_mix_logits)
-        
-        # also turn them into regular numpy arrays, for writing JSON
-        equl_mix_params = np.array(equl_mix_params).tolist()
-        
-        
-        ### add to parameter dictionary
-        out_dict['equl_mix_params'] = equl_mix_params
-        
-        return out_dict

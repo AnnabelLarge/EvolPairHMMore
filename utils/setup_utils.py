@@ -39,11 +39,11 @@ def model_import_register(args):
     elif args.equl_model_type == 'equl_base':
         from model_blocks.equl_distr_models import equl_base as equl_model
     
+    elif args.equl_model_type == 'equl_deltaMixture':
+        from model_blocks.equl_distr_models import equl_deltaMixture  as equl_model
+    
     elif args.equl_model_type == 'equl_dirichletMixture':
         from model_blocks.equl_distr_models import equl_dirichletMixture  as equl_model
-    
-    elif args.equl_model_type == 'equl_mixture':
-        from model_blocks.equl_distr_models import equl_mixture as equl_model
     
     
     ########################

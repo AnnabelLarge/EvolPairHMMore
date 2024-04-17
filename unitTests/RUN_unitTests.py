@@ -43,8 +43,7 @@ testing batched GGI code from indel_models
 
 testing likelihood calculation in utils.training_testing_fns
 -------------------------------------------------------------
-1. calculation of likelihood per timepoint, marginalization across time
-
+1. full likelihood calculation with all single models
 2. recipe for multiplying mixture weights and summing
 
 
@@ -116,12 +115,12 @@ print()
 ##################################################################
 ### testing likelihood calculation in utils.training_testing_fns #
 ##################################################################
-from unitTests.unitTest_calcLogprob_marginalizeTime import main as trainingFn_test1
+from unitTests.unitTest_calcLoglike_singleModels import main as trainingFn_test1
 from unitTests.unitTest_logSum_mixWeights import main as trainingFn_test2
 print('TESTING likelihood calculation in utils.training_testing_fns')
 
 trainingFn_test1()
-print('[PASSED] correct calculation of log likelihoods; marginalization over time')
+print('[PASSED] correct likelihood calculation for all single models')
 
 trainingFn_test2()
 print('[PASSED] correct recipe for adding mixture weights and logsumexp-ing')
