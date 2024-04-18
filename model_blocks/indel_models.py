@@ -22,8 +22,7 @@ Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 
 at a minimum, future classes need:
 ==================================
-all can all inherit "no_indel" to get necessary methods that allow the class
-    to be passed into a jitted function
+0. some built-in method to turn the class into a jit-compatible pytree
 
 1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
@@ -110,7 +109,10 @@ class no_indel:
 ###############################################################################
 ### single GGI indel model   ##################################################
 ###############################################################################
-class GGI_single(no_indel):
+class GGI_single:
+    def __init__(self, tie_params=False):
+        self.tie_params = tie_params
+        
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -164,20 +166,30 @@ class GGI_single(no_indel):
         else:
             y = argparse_obj.y
         
-        # for stochastic gradient descent, transform to (-inf, inf) domain
-        # also add extra k_indel dimension
+        ### keep lambda and x
+        # transform to (-inf, inf) domain; also add extra k_indel dimension
         lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
-        mu_transf = jnp.expand_dims(jnp.sqrt(mu), -1)
         x_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(x)), -1)
-        y_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(y)), -1)
         
-        
-        ### OUTPUT DICTIONARIES
+        # create output param dictionary
         initialized_params = {'lam_transf': lam_transf,
-                              'mu_transf': mu_transf,
-                              'x_transf': x_transf,
-                              'y_transf': y_transf}
+                              'x_transf': x_transf}
         
+        
+        ### if not tying weights, add mu and y separately
+        if not self.tie_params:
+            # also transform domain
+            mu_transf = jnp.expand_dims(jnp.sqrt(mu), -1)
+            y_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(y)), -1)
+            
+            # add to param dict
+            to_add = {'mu_transf': mu_transf,
+                      'y_transf': y_transf}
+            initialized_params = {**initialized_params, **to_add}
+            del to_add
+        
+        
+        ### create hyperparams dictionary
         hparams = {'diffrax_params': argparse_obj.diffrax_params}
         
         return initialized_params, hparams
@@ -190,21 +202,35 @@ class GGI_single(no_indel):
         WHEN IS THIS CALLED: every training loop iteration, every point t
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
-        ### unpack parameters
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
         lam_transf = params_dict['lam_transf']
-        mu_transf = params_dict['mu_transf']
         x_transf = params_dict['x_transf']
-        y_transf = params_dict['y_transf']
+        
+        # undo domain transformation
+        lam = jnp.square(lam_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        
+
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            mu_transf = params_dict['mu_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            mu = jnp.square(mu_transf)
+            y = jnp.exp(-jnp.square(y_transf))
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            mu = lam
+            y = x
+        
         
         ### unpack the hyparpameters
         diffrax_params = hparams_dict['diffrax_params']
         alphabet_size = hparams_dict['alphabet_size']
-        
-        ### undo the domain transformation
-        lam = jnp.square(lam_transf)
-        mu = jnp.square(mu_transf)
-        x = jnp.exp(-jnp.square(x_transf))
-        y = jnp.exp(-jnp.square(y_transf))
         
         # indel params is a tuple of four elements; each elem is (k_indel,)
         # in this case, each elem is of size (1,)
@@ -231,41 +257,69 @@ class GGI_single(no_indel):
         WHEN IS THIS CALLED: when writing params to JSON file
         OUTPUTS: parameter dictionary, with transformed params
         """
-        ### unpack parameters
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
         lam_transf = params_dict['lam_transf']
-        mu_transf = params_dict['mu_transf']
         x_transf = params_dict['x_transf']
-        y_transf = params_dict['y_transf']
         
-        
-        ### undo the domain transformation
+        # undo domain transformation
         lam = jnp.square(lam_transf)
-        mu = jnp.square(mu_transf)
         x = jnp.exp(-jnp.square(x_transf))
-        y = jnp.exp(-jnp.square(y_transf))
         
-        # also turn them into regular integers, for writing JSON
-        lam = lam.item()
-        mu = mu.item()
-        x = x.item()
-        y = y.item()
-        
-        
-        ### add to output dictionary
         out_dict = {}
-        out_dict['lam'] = lam
-        out_dict['mu'] = mu
-        out_dict['x'] = x
-        out_dict['y'] = y
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            mu_transf = params_dict['mu_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            mu = jnp.square(mu_transf)
+            y = jnp.exp(-jnp.square(y_transf))
+            
+            # also turn them into regular integers, for writing JSON
+            lam = lam.item()
+            mu = mu.item()
+            x = x.item()
+            y = y.item()
+            
+            # add to output dictionary
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['x'] = x
+            out_dict['y'] = y
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            # combine lambda and mu under label "indel rate"
+            # combine x and y under label "extension prob"
+            indel_rate = lam.item()
+            extension_prob = x.item()
+            
+            # add to output dictionary
+            out_dict['indel_rate'] = indel_rate
+            out_dict['extension_prob'] = extension_prob
         
         return out_dict
+    
+    ###  v__(these allow the class to be passed into a jitted function)__v  ###
+    def _tree_flatten(self):
+        children = ()
+        aux_data = {'tie_params': self.tie_params} 
+        return (children, aux_data)
+    
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        return cls(*children, **aux_data)
     
     
 
 ###############################################################################
 ### mixture GGI indel model   #################################################
 ###############################################################################
-class GGI_mixture(no_indel):
+# inherit __init__, logprobs_at_t, and methods for 
+#   tree flattening/unflattening from GGI_single
+class GGI_mixture(GGI_single):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -324,73 +378,45 @@ class GGI_mixture(no_indel):
         else:
             y = jnp.array(argparse_obj.y)
         
-        # for stochastic gradient descent, transform to (-inf, inf) domain
-        # also add extra k_indel dimension
+        ### keep lambda and x
+        # transform to (-inf, inf) domain; also add extra k_indel dimension
         lam_transf = jnp.sqrt(lam)
-        mu_transf = jnp.sqrt(mu)
         x_transf = jnp.sqrt(-jnp.log(x))
-        y_transf = jnp.sqrt(-jnp.log(y))
+        
+        # create output param dictionary
+        initialized_params = {'lam_transf': lam_transf,
+                              'x_transf': x_transf}
+        
+        
+        ### if not tying weights, add mu and y separately
+        if not self.tie_params:
+            # also transform domain
+            mu_transf = jnp.sqrt(mu)
+            y_transf = jnp.sqrt(-jnp.log(y))
+            
+            # add to param dict
+            to_add = {'mu_transf': mu_transf,
+                      'y_transf': y_transf}
+            initialized_params = {**initialized_params, **to_add}
+            del to_add
         
         
         ### PARAMETER: mixture logits
         if 'indel_mix_logits' not in provided_args:
             indel_mix_logits = jnp.ones(argparse_obj.k_indel)
         else:
-            indel_mix_logits = jnp.array(argparse_obj.indel_mix_logits, dtype=float)
+            indel_mix_logits = jnp.array(argparse_obj.indel_mix_logits, 
+                                         dtype=float)
+        to_add = {'indel_mix_logits': indel_mix_logits}
+        initialized_params = {**initialized_params, **to_add}
+        del to_add
         
         
         ### OUTPUT DICTIONARIES
-        # parameters to fit with optax
-        initialized_params = {'lam_transf': lam_transf,
-                              'mu_transf': mu_transf,
-                              'x_transf': x_transf,
-                              'y_transf': y_transf,
-                              'indel_mix_logits': indel_mix_logits}
-        
         # dictionary of hyperparameters
         hparams = {'diffrax_params': argparse_obj.diffrax_params}
         
         return initialized_params, hparams
-    
-        
-    def logprobs_at_t(self, t, params_dict, hparams_dict):
-        """
-        ABOUT: calculate the transition matrix at time t
-        JITTED: yes
-        WHEN IS THIS CALLED: every training loop iteration, every point t
-        OUTPUTS: logP(transitions); the GGI transition matrix
-        """
-        ### unpack parameters
-        lam_transf = params_dict['lam_transf']
-        mu_transf = params_dict['mu_transf']
-        x_transf = params_dict['x_transf']
-        y_transf = params_dict['y_transf']
-        
-        ### unpack the hyparpameters
-        diffrax_params = hparams_dict['diffrax_params']
-        alphabet_size = hparams_dict['alphabet_size']
-        
-        ### undo the domain transformation
-        lam = jnp.square(lam_transf)
-        mu = jnp.square(mu_transf)
-        x = jnp.exp(-jnp.square(x_transf))
-        y = jnp.exp(-jnp.square(y_transf))
-        
-        # indel params is a tuple of four elements; each elem is (k_indel,)
-        indel_params = (lam, mu, x, y)
-        
-        # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
-        # (3, 3, k_indel)
-        transmat = transitionMatrix (t, 
-                                     indel_params, 
-                                     alphabet_size,
-                                     **diffrax_params)
-        
-        # if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
-        logprob_transition_at_t = jnp.log(transmat)
-        
-        return logprob_transition_at_t
     
     
     def undo_param_transform(self, params_dict):
@@ -400,35 +426,54 @@ class GGI_mixture(no_indel):
         WHEN IS THIS CALLED: when writing params to JSON file
         OUTPUTS: parameter dictionary, with transformed params
         """
-        ### unpack parameters
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
         lam_transf = params_dict['lam_transf']
-        mu_transf = params_dict['mu_transf']
         x_transf = params_dict['x_transf']
-        y_transf = params_dict['y_transf']
         indel_mix_logits= params_dict['indel_mix_logits']
         
-        
-        ### undo the domain transformation
+        # undo domain transformation
         lam = jnp.square(lam_transf)
-        mu = jnp.square(mu_transf)
         x = jnp.exp(-jnp.square(x_transf))
-        y = jnp.exp(-jnp.square(y_transf))
         indel_mix_probs = softmax(indel_mix_logits)
         
-        # also turn them into regular lists, for writing JSON
-        lam = np.array(lam).tolist()
-        mu = np.array(mu).tolist()
-        x = np.array(x).tolist()
-        y = np.array(y).tolist()
-        indel_mix_probs = np.array(indel_mix_probs).tolist()
-        
-        
-        ### add to output dictionary
         out_dict = {}
-        out_dict['lam'] = lam
-        out_dict['mu'] = mu
-        out_dict['x'] = x
-        out_dict['y'] = y
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            mu_transf = params_dict['mu_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            mu = jnp.square(mu_transf)
+            y = jnp.exp(-jnp.square(y_transf))
+            
+            # also turn them into regular integers, for writing JSON
+            lam = np.array(lam).tolist()
+            mu = np.array(mu).tolist()
+            x = np.array(x).tolist()
+            y = np.array(y).tolist()
+            indel_mix_probs = np.array(indel_mix_probs).tolist()
+            
+            # add to output dictionary
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['x'] = x
+            out_dict['y'] = y
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            # combine lambda and mu under label "indel rate"
+            # combine x and y under label "extension prob"
+            indel_rate = np.array(lam).to_list()
+            extension_prob = np.array(x).to_list()
+            
+            # add to output dictionary
+            out_dict['indel_rate'] = indel_rate
+            out_dict['extension_prob'] = extension_prob
+        
+        
+        ### add indel_mix_probs to the output dictionary too
         out_dict['indel_mix_probs'] = indel_mix_probs
         
         return out_dict
