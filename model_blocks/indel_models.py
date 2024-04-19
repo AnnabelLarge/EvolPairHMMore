@@ -110,7 +110,7 @@ class no_indel:
 ### single GGI indel model   ##################################################
 ###############################################################################
 class GGI_single:
-    def __init__(self, tie_params=False):
+    def __init__(self, tie_params):
         self.tie_params = tie_params
         
     def initialize_params(self, argparse_obj):

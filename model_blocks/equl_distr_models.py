@@ -94,6 +94,15 @@ class equl_base:
         return (equl_vec, logprob_equl)
 
 
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: placeholder function; no parameters in params_dict
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary as-is (empty)
+        """
+        return dict()
+
     ###  v__(these allow the class to be passed into a jitted function)__v  ###
     def _tree_flatten(self):
         children = ()

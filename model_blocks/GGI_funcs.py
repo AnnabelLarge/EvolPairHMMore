@@ -260,28 +260,45 @@ if __name__=='__main__':
     t = 0.1
     alphabet_size = 20
     
-    # k_indel = 5
-    lam = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
-    mu = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
-    x = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
-    y = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
+    # # k_indel = 5
+    # lam = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
+    # mu = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
+    # x = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
+    # y = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
     
-    # k_indel 1
-    # lam = jnp.array([0.1])
-    # mu = jnp.array([0.1])
-    # x = jnp.array([0.1])
-    # y = jnp.array([0.1])
+    # k_indel = 1
+    lam_to_test = jnp.array([1.])
+    mu_to_test = jnp.array([1.])
+    x_to_test = jnp.array([0.])
+    y_to_test = jnp.array([0.])
     
-    indelParams = (lam, mu, x, y)
     
     diffrax_params = {"step": None,
                       "rtol": 1e-3,
                       "atol": 1e-6}
     
     
-    out = transitionMatrix (t, 
-                            indelParams,
-                            alphabetSize=20, 
-                            **diffrax_params)
+    def wrapper(lam, mu, x, y):
+        indelParams = (lam, mu, x, y)
+        trans_mat = transitionMatrix( t,
+                                     indelParams,
+                                     alphabetSize=4,
+                                     **diffrax_params)
         
-        
+        return trans_mat.sum()
+    
+    val_and_grad_fn = jax.value_and_grad(wrapper,
+                                         argnums=[0,1,2,3])
+    
+    out_vals, out_grads = val_and_grad_fn(lam_to_test,
+                                          mu_to_test,
+                                          x_to_test,
+                                          y_to_test)
+    
+    print('Sum(Transition matrix):')
+    print(out_vals)
+    print()
+    
+    print('Gradients:')
+    print([elem.item() for elem in out_grads])
+    print()

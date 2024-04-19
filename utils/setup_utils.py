@@ -50,8 +50,8 @@ def model_import_register(args):
     ### IMPORT INDEL MODEL #
     ########################
     # which indel model; default is no indel model
-    conds = (('indel_model_type' not in dir(args)) +
-             (args.indel_model_type == None) +
+    conds = (('indel_model_type' not in dir(args)) + 
+             (args.indel_model_type == None) + 
              (args.indel_model_type == 'no_indel'))
     if conds > 0:
         from model_blocks.indel_models import no_indel as indel_model
@@ -84,13 +84,13 @@ def model_import_register(args):
     ################
     subst_model_instance = subst_model(args.norm)
     equl_model_instance = equl_model()
-    indel_model_instance = indel_model()
+    indel_model_instance = indel_model(args.tie_params)
     
     # add this model info to the top of the logfile
     logfile_msg = ('TRAINING PairHMM composed of:\n' +
                     f'1.) substitution model: {args.subst_model_type} (norm: {args.norm})\n' +
                     f'2.) equilibrium distribution: {args.equl_model_type}\n' +
-                    f'3.) indel model: {args.indel_model_type}\n')
+                    f'3.) indel model: {args.indel_model_type} (tie_parms: {args.tie_params})\n')
     
     return (subst_model_instance, equl_model_instance, indel_model_instance, 
             logfile_msg)
