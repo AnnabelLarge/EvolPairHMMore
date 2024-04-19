@@ -58,13 +58,19 @@ def main():
     
     
     
-    ##################
-    ### RUN FUNCTION #
-    ##################
-    test_out = summarize_alignment(batch=fake_batch, 
-                                   max_seq_len=5, 
-                                   alphabet_size=4, 
-                                   gap_tok=63)
+    ########################################
+    ### RUN FUNCTION WITH SUBSONLY = FALSE #
+    ########################################
+    summarize_alignment_jitted = jax.jit(summarize_alignment, 
+                                         static_argnames=['max_seq_len',
+                                                          'alphabet_size',
+                                                          'gap_tok',
+                                                          'subsOnly'])
+    
+    test_out = summarize_alignment_jitted(batch=fake_batch, 
+                                          max_seq_len=5, 
+                                          alphabet_size=4, 
+                                          gap_tok=63)
     
     subCounts_persamp =   test_out[0]
     insCounts_persamp =   test_out[1]
@@ -124,6 +130,66 @@ def main():
     true_delCounts = jnp.array([ [0, 0, 0, 0],
                                  [3, 0, 0, 0],
                                  [0, 0, 0, 0] ])
+    
+    assert jnp.allclose(delCounts_persamp, true_delCounts)
+    
+    
+    #######################################
+    ### RUN FUNCTION WITH SUBSONLY = TRUE #
+    #######################################
+    test_out = summarize_alignment_jitted(batch=fake_batch, 
+                                          max_seq_len=5, 
+                                          alphabet_size=4, 
+                                          gap_tok=63,
+                                          subsOnly=True)
+    
+    subCounts_persamp =   test_out[0]
+    insCounts_persamp =   test_out[1]
+    delCounts_persamp =   test_out[2]
+    transCounts_persamp = test_out[3]
+    
+    batch_size = subCounts_persamp.shape[0]
+    alphabet_size = subCounts_persamp.shape[1]
+    del test_out
+    
+    
+    
+    ##################
+    ### CHECK VALUES #
+    ##################
+    # transition counts
+    true_transCounts = jnp.zeros( (batch_size, 3, 3) )
+    
+    assert jnp.allclose(transCounts_persamp, true_transCounts)
+    
+    
+    # substitution counts
+    true_subCounts = jnp.array([ [[1, 0, 0, 0],
+                                  [0, 0, 0, 1],
+                                  [0, 1, 0, 0],
+                                  [0, 0, 1, 0]],
+                                
+                                 [[2, 0, 0, 0],
+                                  [0, 0, 0, 0],
+                                  [0, 0, 0, 0],
+                                  [0, 0, 0, 0]],
+                                 
+                                 [[0, 0, 0, 0],
+                                  [0, 0, 0, 0],
+                                  [0, 0, 0, 0],
+                                  [0, 0, 0, 1]] ])
+    
+    assert jnp.allclose(subCounts_persamp, true_subCounts)
+    
+    
+    # insertion counts
+    true_insCounts = jnp.zeros( (batch_size, alphabet_size) )
+    
+    assert jnp.allclose(insCounts_persamp, true_insCounts)
+    
+    
+    # deletion counts
+    true_delCounts = jnp.zeros( (batch_size, alphabet_size) )
     
     assert jnp.allclose(delCounts_persamp, true_delCounts)
 

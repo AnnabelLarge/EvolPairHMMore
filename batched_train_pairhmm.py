@@ -77,7 +77,8 @@ def load_all_data(folder_name, first_config_filename):
     # training data
     print(f'Creating DataLoader for training set with {args.train_dset_splits}')
     training_dset = hmm_reader(data_dir = args.data_dir, 
-                                split_prefixes = args.train_dset_splits)
+                                split_prefixes = args.train_dset_splits,
+                                subsOnly = args.subsOnly)
     training_dl = DataLoader(training_dset, 
                               batch_size = args.batch_size, 
                               shuffle = True,
@@ -86,7 +87,8 @@ def load_all_data(folder_name, first_config_filename):
     # test data
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits)
+                              split_prefixes = args.test_dset_splits,
+                              subsOnly = args.subsOnly)
     test_dl = DataLoader(test_dset, 
                           batch_size = args.batch_size, 
                           shuffle = False,
@@ -240,7 +242,10 @@ def train_batch(args, output_from_loading_func):
     jitted_eval_fn = jax.jit(eval_fn)
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                             static_argnames='max_seq_len')
+                                             static_argnames=['max_seq_len',
+                                                              'alphabet_size',
+                                                              'gap_tok',
+                                                              'subsOnly'])
         
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 9999
@@ -267,10 +272,11 @@ def train_batch(args, output_from_loading_func):
             if not args.have_precalculated_counts:
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = training_global_max_seqlen)
-                allCounts = summarize_alignment(batch, 
+                allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'])
+                                                gap_tok=hparams['gap_tok'],
+                                                subsOnly = args.subsOnly)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -323,8 +329,8 @@ def train_batch(args, output_from_loading_func):
                            'alphabet_size': args.alphabet_size,
                            't_grid_center': args.t_grid_center,
                            't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grid_num_steps
-                           }
+                           't_grid_num_steps': args.t_grid_num_steps,
+                           'subsOnly': args.subsOnly}
             
             if 'diffrax_params' in dir(args):
                 OUT_forLoad['diffrax_params'] = args.diffrax_params
@@ -383,7 +389,8 @@ def train_batch(args, output_from_loading_func):
                 allCounts = summarize_alignment(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'])
+                                                gap_tok=hparams['gap_tok'],
+                                                subsOnly = args.subsOnly)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch

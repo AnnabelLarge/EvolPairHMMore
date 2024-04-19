@@ -50,9 +50,13 @@ def model_import_register(args):
     ### IMPORT INDEL MODEL #
     ########################
     # which indel model; default is no indel model
-    if ('indel_model_type' not in dir(args)) or (args.indel_model_type == None):
+    conds = (('indel_model_type' not in dir(args)) +
+             (args.indel_model_type == None) +
+             (args.indel_model_type == 'no_indel'))
+    if conds > 0:
         from model_blocks.indel_models import no_indel as indel_model
         args.indel_model_type = 'no_indel'
+    del conds
     
     elif args.indel_model_type == 'GGI_single':
         from model_blocks.indel_models import GGI_single as indel_model

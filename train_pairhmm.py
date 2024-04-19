@@ -47,7 +47,7 @@ from torch.utils.tensorboard import SummaryWriter
 #jax.config.update("jax_debug_nans", True)
 # not sure why, but turning this on fixed my NaN gradient
 #   issues?
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 # custom imports
 from utils.setup_utils import setup_training_dir, model_import_register
@@ -137,7 +137,8 @@ def train_pairhmm(args):
     # 1.2.1: training data
     print(f'Creating DataLoader for training set with {args.train_dset_splits}')
     training_dset = hmm_reader(data_dir = args.data_dir, 
-                               split_prefixes = args.train_dset_splits)
+                               split_prefixes = args.train_dset_splits,
+                               subsOnly = args.subsOnly)
     training_dl = DataLoader(training_dset, 
                              batch_size = args.batch_size, 
                              shuffle = True,
@@ -147,7 +148,8 @@ def train_pairhmm(args):
     # 1.2.2: test data
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits)
+                              split_prefixes = args.test_dset_splits,
+                              subsOnly = args.subsOnly)
     test_dl = DataLoader(test_dset, 
                          batch_size = args.batch_size, 
                          shuffle = False,
@@ -170,7 +172,7 @@ def train_pairhmm(args):
     
     # if this is the base model or the placeholder, use the equilibrium 
     #   distribution from TRAINING data
-    if args.equl_model_type in ['equl_base', 'no_equl']:
+    if args.equl_model_type == 'equl_base':
         equl_model_hparams['equl_vecs_fromData'] = training_dset.retrieve_equil_dist()
     
     
@@ -219,7 +221,8 @@ def train_pairhmm(args):
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
                                              static_argnames=['max_seq_len',
                                                               'alphabet_size',
-                                                              'gap_tok'])
+                                                              'gap_tok',
+                                                              'subsOnly'])
         
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 9999
@@ -248,7 +251,8 @@ def train_pairhmm(args):
                 allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'])
+                                                gap_tok=hparams['gap_tok'],
+                                                subsOnly = args.subsOnly)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -303,7 +307,8 @@ def train_pairhmm(args):
                            'alphabet_size': args.alphabet_size,
                            't_grid_center': args.t_grid_center,
                            't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grid_num_steps
+                           't_grid_num_steps': args.t_grid_num_steps,
+                           'subsOnly': args.subsOnly
                            }
             
             if 'diffrax_params' in dir(args):
@@ -363,7 +368,8 @@ def train_pairhmm(args):
                 allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'])
+                                                gap_tok=hparams['gap_tok'],
+                                                subsOnly = args.subsOnly)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch

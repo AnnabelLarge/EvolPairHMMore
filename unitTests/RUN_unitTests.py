@@ -44,7 +44,8 @@ testing batched GGI code from indel_models
 testing likelihood calculation in utils.training_testing_fns
 -------------------------------------------------------------
 1. full likelihood calculation with all single models
-2. recipe for multiplying mixture weights and summing
+2. full likelihood calculation with no indel model (only score match sites)
+3. recipe for multiplying mixture weights and summing
 
 
 """
@@ -116,13 +117,17 @@ print()
 ### testing likelihood calculation in utils.training_testing_fns #
 ##################################################################
 from unitTests.unitTest_calcLoglike_singleModels import main as trainingFn_test1
-from unitTests.unitTest_logSum_mixWeights import main as trainingFn_test2
+from unitTests.unitTest_subst_only_model import main as trainingFN_test2
+from unitTests.unitTest_logSum_mixWeights import main as trainingFn_test3
 print('TESTING likelihood calculation in utils.training_testing_fns')
 
 trainingFn_test1()
 print('[PASSED] correct likelihood calculation for all single models')
 
 trainingFn_test2()
+print('[PASSED] correct likelihood calculation for only scoring substitution sites')
+
+trainingFn_test3()
 print('[PASSED] correct recipe for adding mixture weights and logsumexp-ing')
 
 print()

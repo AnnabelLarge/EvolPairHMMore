@@ -143,7 +143,7 @@ def main():
     #####################
     parser = argparse.ArgumentParser(prog='train_pairhmm')
     args = parser.parse_args()
-    args.config_file = './unitTests/req_files/CONFIG_singleModels.json'
+    args.config_file = './unitTests/req_files/CONFIG_onlySubs.json'
     
     
     with open(args.config_file, 'r') as f:
@@ -200,14 +200,14 @@ def main():
     ### 1.2: read data; build pytorch dataloaders, and get batch
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits)
+                           split_prefixes = args.test_dset_splits,
+                           subsOnly = args.subsOnly)
     test_dl = DataLoader(test_dset, 
                          batch_size = args.batch_size, 
                          shuffle = False,
                          collate_fn = collator)
     test_global_max_seqlen = test_dset.max_seqlen()
     batch = list(test_dl)[0]
-    
     
     ### 1.3: quantize time in geometric spacing, just like in cherryML
     # in debug mode, only have three timepoints
@@ -225,7 +225,7 @@ def main():
     
     # if this is the base model or the placeholder, use the equilibrium 
     #   distribution from TRAINING data
-    if args.equl_model_type in ['equl_base', 'no_equl']:
+    if args.equl_model_type == 'equl_base':
         equl_model_hparams['equl_vecs_fromData'] = test_dset.retrieve_equil_dist()
         equl_model_hparams['equl_vecs'] = test_dset.retrieve_equil_dist()
     
@@ -258,6 +258,9 @@ def main():
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
     
+    # save this for later
+    subsOnly = args.subsOnly
+    
     
     ### REMOVE unneeded variables
     # for clean variable explorer
@@ -271,14 +274,18 @@ def main():
     ############################
     # jit and summarize the alignment
     summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                         static_argnames='max_seq_len')
+                                         static_argnames=['max_seq_len',
+                                                          'alphabet_size',
+                                                          'gap_tok',
+                                                          'subsOnly'])
 
     batch_max_seqlen = clip_batch_inputs(batch, 
                                          global_max_seqlen = test_global_max_seqlen)
     allCounts = summarize_alignment(batch, 
                                     max_seq_len = batch_max_seqlen, 
                                     alphabet_size=hparams['alphabet_size'], 
-                                    gap_tok=hparams['gap_tok'])
+                                    gap_tok=hparams['gap_tok'],
+                                    subsOnly = subsOnly)
     del batch_max_seqlen
     
     # get transition/emission matrices
@@ -301,6 +308,11 @@ def main():
     delCounts_persamp = allCounts[2]
     transCounts_persamp = allCounts[3]
     del allCounts
+    
+    # make sure insCounts, delCounts, and transCounts are all zero matrices
+    assert jnp.allclose(jnp.zeros(insCounts_persamp.shape), insCounts_persamp)
+    assert jnp.allclose(jnp.zeros(delCounts_persamp.shape), delCounts_persamp)
+    assert jnp.allclose(jnp.zeros(transCounts_persamp.shape), transCounts_persamp)
     
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
@@ -487,6 +499,12 @@ def main():
     del with_indel_mix_weights
     
     
+    ### 4.4.4: make sure that P(ins) = P(del) = P(trans) = 0
+    assert jnp.allclose(jnp.zeros(logP_ins.shape), logP_ins)
+    assert jnp.allclose(jnp.zeros(logP_dels.shape), logP_dels)
+    assert jnp.allclose(jnp.zeros(logP_trans_perTime.shape), logP_trans_perTime)
+    
+    
     ################################
     ### 4.4: marginalize over time #
     ################################
@@ -498,6 +516,9 @@ def main():
                     jnp.expand_dims(logP_ins,0) +
                     jnp.expand_dims(logP_dels,0) +
                     logP_trans_perTime)
+
+    # make sure that logP_perTime ONLY reflects P(subs)
+    assert jnp.allclose(logP_perTime, logP_subs_perTime)
     
     # manual inspection of these element-wise sums show that jax numpy
     #   broadcasting is working ok

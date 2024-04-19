@@ -124,7 +124,8 @@ def eval_pairhmm(args):
     ### 1.2: read data; build pytorch dataloaders
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits)
+                              split_prefixes = args.test_dset_splits,
+                              subsOnly = args.subsOnly)
     test_dl = DataLoader(test_dset, 
                          batch_size = args.batch_size, 
                          shuffle = False,
@@ -148,7 +149,7 @@ def eval_pairhmm(args):
     
     # if this is the base model or the placeholder, use the equilibrium 
     #   distribution from TRAINING data
-    if args.equl_model_type in ['equl_base', 'no_equl']:
+    if args.equl_model_type in ['equl_base']:
         equl_model_hparams['equl_vecs_fromData'] = test_dset.retrieve_equil_dist()
     
     
@@ -189,7 +190,10 @@ def eval_pairhmm(args):
     jitted_eval_fn = jax.jit(eval_fn)
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                              static_argnames='max_seq_len')
+                                             static_argnames=['max_seq_len',
+                                                              'alphabet_size',
+                                                              'gap_tok',
+                                                              'subsOnly'])
     
     eval_df_lst = []
     eval_test_loss = 0
@@ -206,7 +210,8 @@ def eval_pairhmm(args):
             allCounts = summarize_alignment(batch, 
                                             max_seq_len = batch_max_seqlen, 
                                             alphabet_size=hparams['alphabet_size'], 
-                                            gap_tok=hparams['gap_tok'])
+                                            gap_tok=hparams['gap_tok'],
+                                            subsOnly = args.subsOnly)
             del batch_max_seqlen
     
         # if you have these counts, just unpack the batch

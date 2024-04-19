@@ -1,5 +1,5 @@
 {
-	"training_wkdir": "DEBUG_loglike_calc",
+	"training_wkdir": "DEBUG_onlySub",
 	"runname": "debug",
 	"rng_seednum": 59,
 
@@ -20,6 +20,7 @@
 	"t_grid_num_steps": 2,
 
 	"subst_model_type": "subst_base",
+	"subsOnly": true,
 	"norm": true,
 	"exch_file": "LG08_exchangeability_r.npy",
 	"alphabet_size": 20,
@@ -27,15 +28,6 @@
 
 	"equl_model_type": "equl_base",
 
-	"indel_model_type": "GGI_single",
-	"lam": 0.5,
-	"mu": 0.5,
-	"x": 0.5,
-	"y": 0.5,
-	"diffrax_params": {
-		"step": null,
-		"rtol": 1e-3,
-		"atol": 1e-6
-	}
+	"indel_model_type": "no_indel"
 
 }

@@ -52,7 +52,7 @@ def jax_collator(batch):
 
 
 class HMMDset(Dataset):
-    def __init__(self, data_dir, split_prefixes):
+    def __init__(self, data_dir, split_prefixes, subsOnly):
         #######################
         ### SUBSET FULL FILES #
         #######################
@@ -69,7 +69,12 @@ class HMMDset(Dataset):
             metadata_list.append(pd.read_csv(f'./{data_dir}/{split}_metadata.tsv', sep='\t', index_col=0))
             
             ### counts
-            with open(f'./{data_dir}/{split}_AAcounts.npy', 'rb') as f:
+            if not subsOnly:
+                counts_file = f'./{data_dir}/{split}_AAcounts.npy'
+            else:
+                counts_file = f'./{data_dir}/{split}_AAcounts_subsOnly.npy'
+            
+            with open(counts_file, 'rb') as f:
                 self.AAcounts += np.load(f)
                 
             del split
@@ -118,12 +123,17 @@ class HMMDset(Dataset):
 ### TEST THE DATALOADER HERE #
 ##############################
 if __name__ == '__main__':
-    data_dir = 'data_hmm'
-    split_prefixes = ['KPROT_OOD_VALID']
+    # just testing that code works when subsOnly = True; FiveSamp_AAcounts is 
+    #   the same file as FiveSamp_AAcounts_subsOnly
+    subsOnly = True
+    data_dir = 'DEV-DATA_pair_alignments'
+    split_prefixes = ['FiveSamp']
     
     ### initialize the pytorch dataset object
     dset = HMMDset(data_dir = data_dir,
-                   split_prefixes = split_prefixes)
+                   split_prefixes = split_prefixes,
+                   subsOnly = subsOnly)
+    
     
     ### create a dataloader that returns jax arrays
     batch_size = len(dset)

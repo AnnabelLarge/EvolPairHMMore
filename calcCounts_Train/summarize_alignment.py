@@ -129,8 +129,11 @@ def count_transitions(one_alignment_path, start_idxes):
 ###################
 ### MAIN FUNCTION #
 ###################
-def summarize_alignment(batch, max_seq_len, alphabet_size=20, gap_tok=63):
+def summarize_alignment(batch, max_seq_len, subsOnly, 
+                        alphabet_size=20, gap_tok=63):
     """
+    batch:
+    ------
     the first element of batch should be a tensor of aligned sequences that 
     are categorically encoded, with the following non-alphabet tokens:
          0: <pad>
@@ -145,15 +148,21 @@ def summarize_alignment(batch, max_seq_len, alphabet_size=20, gap_tok=63):
     the second element of batch is a vector of size (batch_size,) 
         that has the length of the alignments
     
+    other inputs:
+    -------------
     max_seq_len is how much the sequence tensor should be clipped; I implement 
         "semi-dynamic" padding, where jax jit will cache different versions 
         of this function for different max_seq_len values (designed for inputs 
         with EXCESSIVE padding)
     
-    Returns three tensors:
+    subsOnly: when true, only keep emissions from match prositions (set all 
+        other outputs to zero tensors)
+    
+    Returns four tensors:
         1. subCounts_persite: counts of emissions from MATCH positions
-        3. insCounts_persamp: counts of emissions from INSERT positions
-        2. transCounts: counts of transitions in the batch
+        2. insCounts_persamp: counts of emissions from INSERT positions
+        3. insCounts_persamp: counts of removed substrings from DELETE positions
+        4. transCounts: counts of transitions in the batch
     """
     ### unpack batch input to get sequences and align_lens
     seqs, align_len, _ = batch
@@ -215,35 +224,44 @@ def summarize_alignment(batch, max_seq_len, alphabet_size=20, gap_tok=63):
                                           match_pos,
                                           alphabet_size)
     
+    if subsOnly:
+        return (subCounts_persamp, 
+                jnp.zeros( (subCounts_persamp.shape[0], alphabet_size) ),
+                jnp.zeros( (subCounts_persamp.shape[0], alphabet_size) ),
+                jnp.zeros( (subCounts_persamp.shape[0], 3, 3) )
+                )
     
-    #######################################
-    ### COUNT EMISSIONS FROM INSERT STATE #
-    #######################################
-    insCounts_persamp = count_insertions(seqs = seqs, 
-                                         ins_pos_mask = ins_pos, 
-                                         alphabet_size=alphabet_size)
-    del ins_pos
+    else:
+        #######################################
+        ### COUNT EMISSIONS FROM INSERT STATE #
+        #######################################
+        insCounts_persamp = count_insertions(seqs = seqs, 
+                                             ins_pos_mask = ins_pos, 
+                                             alphabet_size=alphabet_size)
+        del ins_pos
+        
+        
+        #######################################
+        ### COUNT DELETED CHARS FROM ANCESTOR #
+        #######################################
+        delCounts_persamp = count_deletions(seqs = seqs,
+                                            del_pos_mask = del_pos,
+                                            alphabet_size=alphabet_size)
+        del del_pos
+        
+        
+        #######################
+        ### COUNT TRANSITIONS #
+        #######################
+        ### use count_transitions function, defined above
+        ### vmap it along the batch dimension (dim0)
+        counttrans_vmapped = jax.vmap(count_transitions, 
+                                      in_axes=(0, None))
+        start_idxes = jnp.arange(start = 0, 
+                                 stop = paths_with_extra_start_end_matches.shape[1] - 1)
+        transCounts_persamp = counttrans_vmapped(paths_with_extra_start_end_matches, 
+                                                 start_idxes)
     
-    
-    #######################################
-    ### COUNT DELETED CHARS FROM ANCESTOR #
-    #######################################
-    delCounts_persamp = count_deletions(seqs = seqs,
-                                        del_pos_mask = del_pos,
-                                        alphabet_size=alphabet_size)
-    del del_pos
-    
-    
-    #######################
-    ### COUNT TRANSITIONS #
-    #######################
-    ### use count_transitions function, defined above
-    ### vmap it along the batch dimension (dim0)
-    counttrans_vmapped = jax.vmap(count_transitions, 
-                                  in_axes=(0, None))
-    start_idxes = jnp.arange(start = 0, 
-                             stop = paths_with_extra_start_end_matches.shape[1] - 1)
-    transCounts_persamp = counttrans_vmapped(paths_with_extra_start_end_matches, 
-                                             start_idxes)
+        return (subCounts_persamp, insCounts_persamp, delCounts_persamp, transCounts_persamp)
 
-    return (subCounts_persamp, insCounts_persamp, delCounts_persamp, transCounts_persamp)
+    
