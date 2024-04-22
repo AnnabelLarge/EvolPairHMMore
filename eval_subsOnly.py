@@ -215,13 +215,21 @@ def eval_subsOnly(args):
         eval_df_lst.append(meta_df_forBatch)
 
     # 3.2: COMBINE DATAFRAMES ACROSS BATCHES
+    # concat dataframes
     eval_df = pd.concat(eval_df_lst)
+
+    # also get averge loss by aggregating with -jnp.mean()
+    epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
+        del eval_sum_logP
+
+    # make sure this average matches the average from epoch_test_loss
+        loss_from_df = -eval_df['logP(A_t,A_0|model)'].mean()
+        assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
+        del loss_from_df
+
+    # output to files
     with open(output_persamp_file,'w') as g:
         eval_df.to_csv(g, sep='\t')
-    
-    # also output averge loss to a row of a file; aggregate with -jnp.mean()
-    epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
-    del eval_sum_logP
     
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.runname}\t') 

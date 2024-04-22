@@ -245,13 +245,21 @@ def eval_pairhmm(args):
     
     
     # 3.3: COMBINE DATAFRAMES ACROSS BATCHES
+    # concate dataframes
     eval_df = pd.concat(eval_df_lst)
-    with open(output_persamp_file,'w') as g:
-        eval_df.to_csv(g, sep='\t')
-    
-    # also output averge loss to a row of a file; aggregate with -jnp.mean()
+
+    # also get averge loss by aggregating with -jnp.mean()
     epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
     del eval_sum_logP
+
+    # make sure this average matches the average from epoch_test_loss
+        loss_from_df = -eval_df['logP(A_t,A_0|model)'].mean()
+        assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
+        del loss_from_df
+    
+    # output to files
+    with open(output_persamp_file,'w') as g:
+        eval_df.to_csv(g, sep='\t')
     
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.eval_runname}\t') 

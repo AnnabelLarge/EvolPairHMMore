@@ -226,6 +226,10 @@ def train_pairhmm(args):
     best_train_loss = 9999
     best_test_loss = 9999
     for epoch_idx in tqdm(range(args.num_epochs)):
+        # top of the epoch, these aren't yet determined
+        epoch_train_loss = 9999
+        epoch_test_loss = 9999
+        
         # default behavior is to not save model parameters or 
         #   eval set log likelihoods
         record_results = False
@@ -406,6 +410,13 @@ def train_pairhmm(args):
         #   you're recording results; place this outside of folders
         if record_results:
             eval_df = pd.concat(eval_df_lst)
+            
+            # make sure this average matches the average from epoch_test_loss
+            loss_from_df = -eval_df['logP(A_t,A_0|model)'].mean()
+            assert jnp.allclose(loss_from_df, epoch_test_loss, rtol=1e-3)
+            del loss_from_df
+            
+            
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
