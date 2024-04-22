@@ -24,7 +24,7 @@ import json
 
 import jax
 from jax import numpy as jnp
-from jax import make_jaxpr
+from jax import tree_util
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -50,19 +50,15 @@ def eval_subsOnly(args):
     #   since GGI model is so small, just get rid of that
     assert args.loadtype == 'eager'
     
-    ### 0.1: IMPORT SUBSTITUTION MODEL, REGISTER AS PYTREES
-    from model_blocks.protein_subst_models import subst_base as subst_model
-    try:
-        tree_util.register_pytree_node(subst_model,
-                                       subst_model._tree_flatten,
-                                       subst_model._tree_unflatten)
-        except ValueError:
-            pass
+    ### 0.1: DECIDE MODEL PARTS TO IMPORT, REGISTER AS PYTREES
+    out = model_import_register(args)
+    subst_model, equl_model, indel_model, logfile_msg = out
+    del out
     
     ### 0.2: DECIDE DATA READING MODE
     # Use this mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
-        to_add = ('Reading from precalculated counts matrices before'+
+        logfile_msg = ('Reading from precalculated counts matrices before'+
                   ' eval\n\n')
         from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
         from onlyTrain.hmm_dataset import jax_collator as collator
@@ -70,7 +66,7 @@ def eval_subsOnly(args):
     # Use this mode if you need to calculate emission and transition  
     #   counts from pair alignments
     elif not args.have_precalculated_counts:
-        to_add = ('Calculating counts matrices from alignments, then'+
+        logfile_msg = ('Calculating counts matrices from alignments, then'+
                   ' eval\n\n')
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
@@ -95,9 +91,6 @@ def eval_subsOnly(args):
             else:
                 return global_max_seqlen
         
-    logfile_msg = logfile_msg + to_add
-    del to_add
-    
         
     ##############
     ### 1: SETUP #
@@ -186,7 +179,7 @@ def eval_subsOnly(args):
     eval_test_loss = 0
     for batch_idx,batch in enumerate(test_dl):
         # never used, but keep for compatibility
-        rngkey_for_eval = jax.random.fold_in(jax.random.key(0), -(epoch_idx+batch_idx))
+        rngkey_for_eval = jax.random.fold_in(jax.random.key(0), -batch_idx)
         
         # if you DON'T have precalculated counts matrices, will need to 
         #   clip the batch inputs
@@ -205,7 +198,7 @@ def eval_subsOnly(args):
             allCounts = (batch[0], batch[1], batch[2], batch[3])
         
         # evaluate batch loss
-        out = jitted_eval_fn(all_counts = allCounts, 
+        out = eval_fn(all_counts = allCounts, 
                              t_arr = t_array, 
                              pairHMM = pairHMM, 
                              params_dict = params, 
@@ -215,7 +208,7 @@ def eval_subsOnly(args):
         batch_test_loss, logprob_per_sample = out
         del out
         
-        epoch_test_loss += batch_test_loss
+        eval_test_loss += batch_test_loss
         del batch_test_loss
         
         # record the log losses per sample
@@ -261,15 +254,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='eval_subsOnly')
     
     
-    # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # # config files required to run
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    args.config_file = 'FiveSamp_subsOnly.json'
     
     
     with open(args.config_file, 'r') as f:

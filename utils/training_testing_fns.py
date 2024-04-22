@@ -308,6 +308,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     insCounts_persamp = all_counts[1] 
     delCounts_persamp = all_counts[2]
     transCounts_persamp = all_counts[3]
+    breakpoint()
     del all_counts
     
     # unpack model tuple

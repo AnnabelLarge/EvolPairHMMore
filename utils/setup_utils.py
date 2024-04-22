@@ -21,48 +21,48 @@ def model_import_register(args):
     ########################
     ### IMPORT SUBST MODEL #
     ########################
+    # if nothing specified, then use subst_base
     if args.subst_model_type == 'subst_base':
         from model_blocks.protein_subst_models import subst_base as subst_model
-        
-    elif args.subst_model_type == 'LG_mixture':
-        from model_blocks.protein_subst_models import LG_mixture as subst_model
+    
+    ### come back to this model if you make rate classes depend on other 
+    ###   factors (this is kind of useless right now)
+    # elif args.subst_model_type == 'LG_mixture':
+    #     from model_blocks.protein_subst_models import LG_mixture as subst_model
     
     
     ####################################
     ### IMPORT EQUL DISTRIBUTION MODEL #
     ####################################
-    # default is no_equl
-    if ('equl_model_type' not in dir(args)) or (args.equl_model_type == None):
-        from model_blocks.equl_distr_models import no_equl as equl_model
-        args.equl_model_type = 'no_equl'
-    
-    elif args.equl_model_type == 'equl_base':
-        from model_blocks.equl_distr_models import equl_base as equl_model
-    
-    elif args.equl_model_type == 'equl_deltaMixture':
+    # if nothing specified, then use equl_base
+    if args.equl_model_type == 'equl_deltaMixture':
         from model_blocks.equl_distr_models import equl_deltaMixture  as equl_model
     
     elif args.equl_model_type == 'equl_dirichletMixture':
         from model_blocks.equl_distr_models import equl_dirichletMixture  as equl_model
     
+    else:
+        from model_blocks.equl_distr_models import equl_base as equl_model
+        args.equl_model_type = 'equl_base'
+    
     
     ########################
     ### IMPORT INDEL MODEL #
     ########################
-    # which indel model; default is no indel model
-    conds = (('indel_model_type' not in dir(args)) + 
-             (args.indel_model_type == None) + 
-             (args.indel_model_type == 'no_indel'))
-    if conds > 0:
-        from model_blocks.indel_models import no_indel as indel_model
-        args.indel_model_type = 'no_indel'
-    del conds
-    
-    elif args.indel_model_type == 'GGI_single':
+    # if nothing specified, then use no indel model
+    if args.indel_model_type == 'GGI_single':
         from model_blocks.indel_models import GGI_single as indel_model
+    
+    elif args.indel_model_type == 'TKF91_single':
+        from model_blocks.indel_models import TKF91_single as indel_model
     
     elif args.indel_model_type == 'GGI_mixture':
         from model_blocks.indel_models import GGI_mixture as indel_model
+        
+    else:
+        from model_blocks.indel_models import no_indel as indel_model
+        args.indel_model_type = 'no_indel'
+        
     
     
     #################################
@@ -83,17 +83,30 @@ def model_import_register(args):
     ### INITIALIZE #
     ################
     subst_model_instance = subst_model(args.norm)
+    logfile_msg1 = (f'1.) substitution model: {args.subst_model_type};'+
+                    f' (norm: {args.norm})\n')
+    
     equl_model_instance = equl_model()
-    indel_model_instance = indel_model(args.tie_params)
+    logfile_msg2 = (f'2.) equilibrium distribution: {args.equl_model_type}\n')
+    
+    if 'tie_params' in vars(args).keys():
+        indel_model_instance = indel_model(args.tie_params)
+        logfile_msg3 = (f'3.) indel model: {args.indel_model_type};'+
+                        f'(tie_parms: {args.tie_params})\n')
+    else:
+        indel_model_instance = indel_model()
+        logfile_msg3 = (f'3.) indel model: {args.indel_model_type}')
+        
     
     # add this model info to the top of the logfile
-    logfile_msg = ('TRAINING PairHMM composed of:\n' +
-                    f'1.) substitution model: {args.subst_model_type} (norm: {args.norm})\n' +
-                    f'2.) equilibrium distribution: {args.equl_model_type}\n' +
-                    f'3.) indel model: {args.indel_model_type} (tie_parms: {args.tie_params})\n')
+    out_logfile_msg = ('TRAINING PairHMM composed of:\n' +
+                        logfile_msg1 +
+                        logfile_msg2 +
+                        logfile_msg3 
+                        )
     
     return (subst_model_instance, equl_model_instance, indel_model_instance, 
-            logfile_msg)
+            out_logfile_msg)
 
 
 

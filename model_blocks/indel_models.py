@@ -14,10 +14,13 @@ Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 
 2. GGI_mixture
 
-3. no_indel
-   > placeholder so that training script will run, but indels will not 
-     be scored
+3. TKF91_single
+   > NOTE: implemented by using GGI machinery because it's easy to copy/paste 
+          code, but exact solutions to DiffEqs exist for this model
 
+4. no_indel
+   > placeholder so that training script will run, but P(transitions)=0 for 
+     all transitions that are not M->M
 
 
 at a minimum, future classes need:
@@ -34,7 +37,6 @@ at a minimum, future classes need:
 3. undo_param_transform(self, params_dict): undo any domain transformations
      and output regular list/ints; mainly used for recording results to
      tensorboard, JSON, or anything else that doesn't like jax arrays
-     > if NO transforms are needed, this can be inherited as-is from "no_indel"
        
 
 universal order of dimensions:
@@ -50,7 +52,7 @@ import jax
 from jax import numpy as jnp
 from jax.nn import softmax
 
-### if training/evaluating GGI model, use the functions from Ian
+### if training/evaluating GGI or TKF91 model, use the functions from Ian
 from model_blocks.GGI_funcs import transitionMatrix
 
 # We replace zeroes and infinities with small numbers sometimes
@@ -82,7 +84,7 @@ class no_indel:
         ABOUT: return a placeholder matrix for every time t
         JITTED: yes
         WHEN IS THIS CALLED: every training loop iteration, every point t
-        OUTPUTS: empty transition matrix (3,3,1); P(transitions)=0
+        OUTPUTS: empty transition matrix (3,3,1); logP(transitions)=0
         """
         return jnp.zeros((3,3,1))
     
@@ -137,7 +139,8 @@ class GGI_single:
               > DEFAULT:  0.5
               > DOMAIN RESTRICTION: (0, 1)
             
-        hparams to pass on (or infer): None
+        hparams to pass on (or infer):
+            - diffrax params (from argparse)
         """
         provided_args = dir(argparse_obj)
         
@@ -477,3 +480,143 @@ class GGI_mixture(GGI_single):
         out_dict['indel_mix_probs'] = indel_mix_probs
         
         return out_dict
+
+
+###############################################################################
+### single TKF91 indel model   ################################################
+###############################################################################
+# inherit __init__ and methods for tree flattening/unflattening from GGI_single
+class TKF91_single(GGI_single):
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit:
+            - lambda (insertion rates)
+              > DEFAULT: 0.5
+              > DOMAIN RESTRICTION: greater than 0
+                  
+            - mu (deletion rates)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: greater than 0
+                  
+        hparams to pass on (or infer):
+            - diffrax params (from argparse)
+        """
+        provided_args = dir(argparse_obj)
+        
+        ### PARAMETER: birth rate lambda
+        # init
+        if 'lam' not in provided_args:
+            lam = 0.5
+        else:
+            lam = argparse_obj.lam
+        
+        # transform to (-inf, inf) domain; also add extra k_indel dimension
+        lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
+        
+        # create output param dictionary
+        initialized_params = {'lam_transf': lam_transf}
+        
+        ### PARAMETER: if not tying weights, add death rate, mu, separately
+        if not self.tie_params:
+            # init
+            if 'mu' not in provided_args:
+                mu = 0.5
+            else:
+                mu = argparse_obj.mu
+            
+            # transform to (-inf, inf) domain and add extra k_indel dimension
+            mu_transf = jnp.expand_dims(jnp.sqrt(mu), -1)
+            
+            # add to param dict
+            to_add = {'mu_transf': mu_transf}
+            initialized_params = {**initialized_params, **to_add}
+            del to_add
+        
+        ### HPARAMS: create hyperparams dictionary
+        hparams = {'diffrax_params': argparse_obj.diffrax_params}
+        
+        return initialized_params, hparams
+        
+        
+    def logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: calculate the transition matrix at time t
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration, every point t
+        OUTPUTS: logP(transitions); the GGI transition matrix
+        """
+        ### lambda: unpack params, undo domain transf
+        lam_transf = params_dict['lam_transf']
+        lam = jnp.square(lam_transf)
+        
+        
+        if not self.tie_params:
+            ### mu and y are independent params; unpack and undo domain transf
+            mu_transf = params_dict['mu_transf']
+            mu = jnp.square(mu_transf)
+        
+        else:
+            ### mu takes on value of lambda
+            mu = lam
+        
+        
+        ### for TKF91: x = y = 0
+        x = jnp.array([0])
+        y = jnp.array([0])
+        
+        
+        ### unpack the hyparpameters
+        diffrax_params = hparams_dict['diffrax_params']
+        alphabet_size = hparams_dict['alphabet_size']
+        
+        # indel params is a tuple of four elements; each elem is (k_indel,)
+        # in this case, each elem is of size (1,)
+        indel_params = (lam, mu, x, y)
+        
+        # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
+        # (3, 3, k_indel); in this case, k_indel=1
+        transmat = transitionMatrix (t, 
+                                     indel_params, 
+                                     alphabet_size,
+                                     **diffrax_params)
+        
+        # if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
+        logprob_transition_at_t = jnp.log(transmat)
+        
+        return logprob_transition_at_t
+    
+    
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### lambda: unpack and undo transform
+        lam_transf = params_dict['lam_transf']
+        lam = jnp.square(lam_transf)
+        
+        out_dict = {}
+        if not self.tie_params:
+            ### mu: unpack and undo transform, if distinct from lambda
+            mu_transf = params_dict['mu_transf']
+            mu = jnp.square(mu_transf)
+            
+            # add to output dictionary
+            out_dict['lam'] = lam.item()
+            out_dict['mu'] = mu.item()
+        
+        else:
+            ### mu = lam = indel_rate
+            out_dict['indel_rate'] = lam.item()
+            
+        return out_dict
+    
+    

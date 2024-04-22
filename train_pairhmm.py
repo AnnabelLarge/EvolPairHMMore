@@ -231,7 +231,7 @@ def train_pairhmm(args):
     # when to save a model's parameters
     best_epoch = -1
     best_train_loss = 9999
-    
+    best_test_loss = 9999
     for epoch_idx in tqdm(range(args.num_epochs)):
         # default behavior is to not save model parameters or 
         #   eval set log likelihoods
@@ -349,6 +349,7 @@ def train_pairhmm(args):
                 g.write(f'New best training loss at epoch {epoch_idx}: {ave_epoch_train_loss}\n')
             
             # update save criteria
+            best_epoch = epoch_idx
             best_train_loss = ave_epoch_train_loss
     
         
@@ -414,6 +415,10 @@ def train_pairhmm(args):
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
+            
+            # also make sure to record "best_test_loss" i.e. the test loss
+            #   whenever best training loss is reached
+            best_test_loss = ave_epoch_test_loss
 
 
         ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
@@ -427,11 +432,11 @@ def train_pairhmm(args):
             early_stopping_counter = 0
         
         if early_stopping_counter == args.patience:
-            # write to logfile
             with open(args.logfile_name,'a') as g:
                 g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
-                g.write(f'Final training loss: {ave_epoch_train_loss}\n')
-                g.write(f'Final test loss: {ave_epoch_test_loss}\n')
+                g.write(f'Best epoch: {best_epoch}\n')
+                g.write(f'Best training loss: {best_train_loss}\n')
+                g.write(f'Test loss at best epoch: {best_test_loss}\n')
                 
             # rage quit
             break
@@ -463,16 +468,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='train_pairhmm')
     
     
-    # # config files required to run
-    # parser.add_argument('--config-file',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file in json format.')
+    # config files required to run
+    parser.add_argument('--config-file',
+                        type = str,
+                        required=True,
+                        help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
-    args.config_file = 'CONFIG_equlMixr3.json'
     
     
     with open(args.config_file, 'r') as f:
