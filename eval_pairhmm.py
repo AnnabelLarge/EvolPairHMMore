@@ -195,7 +195,7 @@ def eval_pairhmm(args):
                                                               'subsOnly'])
     
     eval_df_lst = []
-    eval_test_loss = 0
+    eval_sum_logP = 0
     for batch_idx,batch in enumerate(test_dl):
         ### 3.1: EVAL ON ALL SAMPLES IN THE BATCH
         # fold in epoch_idx and batch_idx for eval 
@@ -225,10 +225,12 @@ def eval_pairhmm(args):
                               hparams_dict = hparams,
                               eval_rngkey = rngkey_for_eval)
     
-        batch_test_loss, logprob_per_sample = out
+        _, batch_sum_logP, logprob_per_sample = 
+        del out
         
         # add to eval_test_loss
-        eval_test_loss += batch_test_loss
+        eval_sum_logP += batch_sum_logP
+        del batch_sum_logP
         
     
         ### 3.2: RECORD RESULTS IN DATAFRAME
@@ -247,13 +249,13 @@ def eval_pairhmm(args):
     with open(output_persamp_file,'w') as g:
         eval_df.to_csv(g, sep='\t')
     
-    # also output averge loss to a row of a file; can concat from all runs later
-    ave_epoch_test_loss = float(eval_test_loss/len(test_dl))
-    del eval_test_loss
+    # also output averge loss to a row of a file; aggregate with -jnp.mean()
+    epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
+    del eval_sum_logP
     
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.eval_runname}\t') 
-        g.write(f'{ave_epoch_test_loss}\n')
+        g.write(f'{epoch_eval_loss}\n')
 
 
 

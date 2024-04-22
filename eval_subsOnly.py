@@ -169,7 +169,7 @@ def eval_subsOnly(args):
      
     ### 3.1: CHECK PERFORMANCE ON TEST SET
     eval_df_lst = []
-    eval_test_loss = 0
+    eval_sum_logP = 0
     for batch_idx,batch in enumerate(test_dl):
         # never used, but keep for compatibility
         rngkey_for_eval = jax.random.fold_in(jax.random.key(0), -batch_idx)
@@ -198,11 +198,11 @@ def eval_subsOnly(args):
                              hparams_dict = hparams,
                              eval_rngkey = rngkey_for_eval)
         
-        batch_test_loss, logprob_per_sample = out
+        _, batch_sum_logP, logprob_per_sample = out
         del out
         
-        eval_test_loss += batch_test_loss
-        del batch_test_loss
+        eval_sum_logP += batch_sum_logP
+        del batch_sum_logP
         
         # record the log losses per sample
         # get the batch sample labels, associated metadata
@@ -219,13 +219,13 @@ def eval_subsOnly(args):
     with open(output_persamp_file,'w') as g:
         eval_df.to_csv(g, sep='\t')
     
-    # also output averge loss to a row of a file; can concat from all runs later
-    ave_test_loss = float(eval_test_loss/len(test_dl))
-    del eval_test_loss
+    # also output averge loss to a row of a file; aggregate with -jnp.mean()
+    epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
+    del eval_sum_logP
     
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.runname}\t') 
-        g.write(f'{ave_test_loss}\n')
+        g.write(f'{epoch_eval_loss}\n')
     
     
 

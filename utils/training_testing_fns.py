@@ -266,20 +266,25 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         ### 1.4.3: logsumexp across time dimension (dim0)
         logP = logsumexp_withZeros(logP_perTime_withConst,
                                    axis=0)
+
+        # output sum to get larger average across all batches
+        # (not just this particular batch)
+        sum_logP = jnp.sum(logP)
         
         ### 1.4.4: final loss is -mean(logP) of this
         loss = -jnp.mean(logP)
         
-        return loss
+        return loss, sum_logP
     
     
     ### set up the grad functions, based on above apply function
-    ggi_grad_fn = jax.value_and_grad(apply_model, has_aux=False)
+    ggi_grad_fn = jax.value_and_grad(apply_model, has_aux=True)
     
     # return loss and gradients
-    loss, all_grads = ggi_grad_fn(params_dict)
+    out_tup, all_grads = ggi_grad_fn(params_dict)
+    loss, sum_logP = out_tup
     
-    return loss, all_grads
+    return loss, sum_logP, all_grads
     
 
 
@@ -470,9 +475,13 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ### 1.4.3: logsumexp across time dimension (dim0)
     logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                        axis=0)
+
+    # return sum_logP, to do larger average over ALL batches (not just this one)
+    sum_logP = jnp.sum(logP_perSamp)
     
     ### 1.4.4: final loss is -mean(logP_perSamp) of this
     loss = -jnp.mean(logP_perSamp)
     
     
-    return(loss, logP_perSamp)
+    return (loss, sum_logP, logP_perSamp)
+

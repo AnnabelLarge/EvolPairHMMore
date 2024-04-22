@@ -260,7 +260,7 @@ def train_batch(args, output_from_loading_func):
         record_results = False
         
         ### 3.2: TRAINING PHASE
-        epoch_train_loss = 0
+        epoch_train_sum_logP = 0
         for batch_idx, batch in enumerate(training_dl):
             # fold in epoch_idx and batch_idx for training
             rngkey_for_training = jax.random.fold_in(rngkey, epoch_idx+batch_idx)
@@ -289,7 +289,7 @@ def train_batch(args, output_from_loading_func):
                                   params_dict = params, 
                                   hparams_dict = hparams,
                                   training_rngkey = rngkey_for_training)
-            batch_train_loss, param_grads = out
+            _, batch_train_sum_logP, param_grads = out
             del out
 
             
@@ -298,26 +298,27 @@ def train_batch(args, output_from_loading_func):
             params = optax.apply_updates(params, updates)
             
             # add to total loss for this epoch
-            epoch_train_loss += batch_train_loss
-            del batch_train_loss
+            epoch_train_sum_logP += batch_train_sum_logP
+            del batch_train_sum_logP
         
         
         ### 3.3: GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD
-        ave_epoch_train_loss = float(epoch_train_loss/len(training_dl))
-        writer.add_scalar('Loss/training set', ave_epoch_train_loss, epoch_idx)
+        # aggregate with the equilvalent of -jnp.mean()
+        epoch_train_loss = float( -( epoch_train_sum_logP/len(training_dset) ) )
+        writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
         # if the training loss is nan, stop training
-        if jnp.isnan(ave_epoch_train_loss):
+        if jnp.isnan(epoch_train_loss):
             with open(args.logfile_name,'a') as g:
                 g.write(f'NaN training loss at epoch {epoch_idx}')
             raise ValueError(f'NaN training loss at epoch {epoch_idx}')
         
         # free up variables
-        del batch, allCounts, epoch_train_loss
+        del batch, allCounts, epoch_train_sum_logP
 
 
         ### 3.4: IF THE TRAINING LOSS IS BETTER, SAVE MODEL WITH PARAMETERS
-        if ave_epoch_train_loss < best_train_loss:
+        if epoch_train_loss < best_train_loss:
             # swap the flag
             record_results = True
             
@@ -368,16 +369,16 @@ def train_batch(args, output_from_loading_func):
             
             # record to log file
             with open(args.logfile_name,'a') as g:
-                g.write(f'New best training loss at epoch {epoch_idx}: {ave_epoch_train_loss}\n')
+                g.write(f'New best training loss at epoch {epoch_idx}: {epoch_train_loss}\n')
             
             # update save criteria
             best_epoch = epoch_idx
-            best_train_loss = ave_epoch_train_loss
+            best_train_loss = epoch_train_loss
     
         
         ### 3.5: CHECK PERFORMANCE ON HELD-OUT TEST SET
         eval_df_lst = []
-        epoch_test_loss = 0
+        epoch_test_sum_logP = 0
         for batch_idx,batch in enumerate(test_dl):
             # fold in epoch_idx and batch_idx for eval (use negative value, 
             #   to have distinctly different random keys from training)
@@ -407,11 +408,11 @@ def train_batch(args, output_from_loading_func):
                                  hparams_dict = hparams,
                                  eval_rngkey = rngkey_for_eval)
             
-            batch_test_loss, logprob_per_sample = out
+            _, batch_test_sum_logP, logprob_per_sample = out
             del out
             
-            epoch_test_loss += batch_test_loss
-            del batch_test_loss
+            epoch_test_sum_logP += batch_test_sum_logP
+            del batch_test_sum_logP
             
             # if record_results is triggered (by section 2.4), also record
             # the log losses per sample
@@ -425,10 +426,10 @@ def train_batch(args, output_from_loading_func):
                 
                 eval_df_lst.append(meta_df_forBatch)
 
-        # get the average epoch_test_loss; record
-        ave_epoch_test_loss = float(epoch_test_loss/len(test_dl))
-        writer.add_scalar('Loss/test set', ave_epoch_test_loss, epoch_idx)
-        del epoch_test_loss, batch
+        # get the average epoch_test_loss by aggregating via -jnp.mean(); record
+        epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
+        writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
+        del epoch_test_sum_logP, batch
 
         # output the metadata + losses dataframe, along with what epoch 
         #   you're recording results; place this outside of folders
@@ -440,14 +441,14 @@ def train_batch(args, output_from_loading_func):
             
             # also make sure to record "best_test_loss" i.e. the test loss
             #   whenever best training loss is reached
-            best_test_loss = ave_epoch_test_loss
+            best_test_loss = epoch_test_loss
 
 
         ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
         ###      stop training; reset counter if the loss decreases again 
         ###      (this is directly from Ian)
         if (jnp.allclose (prev_test_loss, 
-                          jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
+                          jnp.minimum (prev_test_loss, epoch_test_loss), 
                           rtol=1e-05) ):
             early_stopping_counter += 1
         else:
@@ -464,11 +465,19 @@ def train_batch(args, output_from_loading_func):
             break
         
         # remember this epoch's loss for next iteration
-        prev_test_loss = ave_epoch_test_loss
+        prev_test_loss = epoch_test_loss
         
         
     ### when you're done with the function, close the tensorboard writer
     writer.close()
+
+
+    ### if early stopping was never triggered, record results at last epoch
+    if early_stopping_counter != args.patience:
+        with open(args.logfile_name,'a') as g:
+            g.write(f'\n\nRegular stopping after {epoch_idx} full epochs:\n')
+            g.write(f'Final training loss: {epoch_train_loss}\n')
+            g.write(f'Final test loss: {epoch_test_loss}\n')
     
     
 
