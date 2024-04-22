@@ -39,7 +39,6 @@ import json
 
 import jax
 from jax import numpy as jnp
-from jax import make_jaxpr
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter

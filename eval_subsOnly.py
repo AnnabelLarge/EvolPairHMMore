@@ -24,16 +24,9 @@ import json
 
 import jax
 from jax import numpy as jnp
-from jax import tree_util
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-
-# for debugging nans
-#jax.config.update("jax_debug_nans", True)
-# not sure why, but turning this on fixed my NaN gradient
-#   issues?
-# jax.config.update("jax_enable_x64", True)
 
 # custom imports
 from utils.setup_utils import setup_training_dir, model_import_register
@@ -198,7 +191,7 @@ def eval_subsOnly(args):
             allCounts = (batch[0], batch[1], batch[2], batch[3])
         
         # evaluate batch loss
-        out = eval_fn(all_counts = allCounts, 
+        out = jitted_eval_fn(all_counts = allCounts, 
                              t_arr = t_array, 
                              pairHMM = pairHMM, 
                              params_dict = params, 
@@ -254,16 +247,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='eval_subsOnly')
     
     
-    # # config files required to run
-    # parser.add_argument('--config-file',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file in json format.')
+    # config files required to run
+    parser.add_argument('--config-file',
+                        type = str,
+                        required=True,
+                        help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
-    args.config_file = 'FiveSamp_subsOnly.json'
     
     
     with open(args.config_file, 'r') as f:

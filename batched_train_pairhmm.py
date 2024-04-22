@@ -37,7 +37,6 @@ import json
 
 import jax
 from jax import numpy as jnp
-from jax import make_jaxpr
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -254,8 +253,7 @@ def train_batch(args, output_from_loading_func):
     # when to save a model's parameters
     best_epoch = -1
     best_train_loss = 9999
-    
-    
+    best_test_loss = 9999
     for epoch_idx in tqdm(range(args.num_epochs)):
         # default behavior is to not save model parameters or 
         #   eval set log likelihoods
@@ -284,6 +282,7 @@ def train_batch(args, output_from_loading_func):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
+            # DEBUG: turned jit off
             out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
@@ -292,6 +291,7 @@ def train_batch(args, output_from_loading_func):
                                   training_rngkey = rngkey_for_training)
             batch_train_loss, param_grads = out
             del out
+
             
             # update the parameters dictionary with optax
             updates, opt_state = tx.update(param_grads, opt_state)
@@ -330,7 +330,8 @@ def train_batch(args, output_from_loading_func):
                            't_grid_center': args.t_grid_center,
                            't_grid_step': args.t_grid_step,
                            't_grid_num_steps': args.t_grid_num_steps,
-                           'subsOnly': args.subsOnly}
+                           'subsOnly': args.subsOnly
+                           }
             
             if 'diffrax_params' in dir(args):
                 OUT_forLoad['diffrax_params'] = args.diffrax_params
@@ -370,6 +371,7 @@ def train_batch(args, output_from_loading_func):
                 g.write(f'New best training loss at epoch {epoch_idx}: {ave_epoch_train_loss}\n')
             
             # update save criteria
+            best_epoch = epoch_idx
             best_train_loss = ave_epoch_train_loss
     
         
@@ -386,7 +388,7 @@ def train_batch(args, output_from_loading_func):
             if not args.have_precalculated_counts:
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = test_global_max_seqlen)
-                allCounts = summarize_alignment(batch, 
+                allCounts = summarize_alignment_jitted(batch, 
                                                 max_seq_len = batch_max_seqlen, 
                                                 alphabet_size=hparams['alphabet_size'], 
                                                 gap_tok=hparams['gap_tok'],
@@ -435,6 +437,10 @@ def train_batch(args, output_from_loading_func):
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
+            
+            # also make sure to record "best_test_loss" i.e. the test loss
+            #   whenever best training loss is reached
+            best_test_loss = ave_epoch_test_loss
 
 
         ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
@@ -448,11 +454,11 @@ def train_batch(args, output_from_loading_func):
             early_stopping_counter = 0
         
         if early_stopping_counter == args.patience:
-            # write to logfile
             with open(args.logfile_name,'a') as g:
                 g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
-                g.write(f'Final training loss: {ave_epoch_train_loss}\n')
-                g.write(f'Final test loss: {ave_epoch_test_loss}\n')
+                g.write(f'Best epoch: {best_epoch}\n')
+                g.write(f'Best training loss: {best_train_loss}\n')
+                g.write(f'Test loss at best epoch: {best_test_loss}\n')
                 
             # rage quit
             break

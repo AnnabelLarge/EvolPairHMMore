@@ -38,16 +38,9 @@ import json
 
 import jax
 from jax import numpy as jnp
-from jax import make_jaxpr
 import optax
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-
-# for debugging nans
-#jax.config.update("jax_debug_nans", True)
-# not sure why, but turning this on fixed my NaN gradient
-#   issues?
-# jax.config.update("jax_enable_x64", True)
 
 # custom imports
 from utils.setup_utils import setup_training_dir, model_import_register
