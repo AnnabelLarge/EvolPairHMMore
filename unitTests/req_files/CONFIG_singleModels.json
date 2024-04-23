@@ -29,6 +29,7 @@
 	"equl_model_type": "equl_base",
 
 	"indel_model_type": "GGI_single",
+	"tie_params": false,
 	"lam": 0.5,
 	"mu": 0.5,
 	"x": 0.5,

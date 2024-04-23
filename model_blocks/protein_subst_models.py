@@ -92,8 +92,9 @@ class subst_base:
             - alphabet_size
             - exchangeabilities matrix
         """
-        ### load exchangeabilities file
-        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
+        ### load one exchangeabilities file; argparse_obj.exch_files is a 
+        ###   single string; final matrix is size (i,j)
+        file_to_load = f'exchangeability_matrices/{argparse_obj.exch_files}'
         with open(file_to_load,'rb') as f:
             exch_mat = jnp.load(f)
         
@@ -239,212 +240,212 @@ class subst_base:
     
 
 
-###############################################################################
-### mixture substitution model (using the LG rate class method)   #############
-###############################################################################
-class LG_mixture(subst_base):
-    def initialize_params(self, argparse_obj):
-        """
-        ABOUT: return (possibly transformed) parameters and hyperparams
-        JITTED: no
-        WHEN IS THIS CALLED: once, upon model instantiation
-        OUTPUTS: dictionary of initial parameters for optax (if any)
+# ###############################################################################
+# ### mixture substitution model (using the LG rate class method)   #############
+# ###############################################################################
+# class LG_mixture(subst_base):
+#     def initialize_params(self, argparse_obj):
+#         """
+#         ABOUT: return (possibly transformed) parameters and hyperparams
+#         JITTED: no
+#         WHEN IS THIS CALLED: once, upon model instantiation
+#         OUTPUTS: dictionary of initial parameters for optax (if any)
         
-        params to fit:
-            - gamma shape
-              > DEFAULT: 1
-              > DOMAIN RESTRICTION: must be greater than zero
+#         params to fit:
+#             - gamma shape
+#               > DEFAULT: 1
+#               > DOMAIN RESTRICTION: must be greater than zero
               
-            - mixture logits
-              > DEFAULT: vector of 1s, length of k_subst
+#             - mixture logits
+#               > DEFAULT: vector of 1s, length of k_subst
         
-        hparams to pass on (or infer):
-            - alphabet_size
-            - exchangeability matrix
-        """
-        provided_args = dir(argparse_obj)
+#         hparams to pass on (or infer):
+#             - alphabet_size
+#             - exchangeability matrix
+#         """
+#         provided_args = dir(argparse_obj)
         
-        ### PARAMETER: gamma shape
-        # if not provided, set to 1
-        if 'gamma_shape' not in provided_args:
-            gamma_shape = 1
+#         ### PARAMETER: gamma shape
+#         # if not provided, set to 1
+#         if 'gamma_shape' not in provided_args:
+#             gamma_shape = 1
             
-        # otherwise, read from argparse object and make sure the domain
-        #   restriction is satisfied
-        else:
-            gamma_shape = argparse_obj.gamma_shape
+#         # otherwise, read from argparse object and make sure the domain
+#         #   restriction is satisfied
+#         else:
+#             gamma_shape = argparse_obj.gamma_shape
             
-            # has to be greater than zero
-            err_msg = ('Initial guess for GAMMA SHAPE must be greater than zero,'+
-                      f' but recieved gamma_shape={gamma_shape}')
-            assert gamma_shape > 0, err_msg
-            del err_msg
+#             # has to be greater than zero
+#             err_msg = ('Initial guess for GAMMA SHAPE must be greater than zero,'+
+#                       f' but recieved gamma_shape={gamma_shape}')
+#             assert gamma_shape > 0, err_msg
+#             del err_msg
         
-        # for stochastic gradient descent, transform to (-inf, inf) domain
-        gamma_shape_transf = jnp.sqrt(gamma_shape)
-        
-        
-        ### PARAMETER: mixture logits
-        # if not provided, generate a logits vector of ones
-        if 'subst_mix_logits' not in provided_args:
-            subst_mix_logits = jnp.ones(argparse_obj.k_subst)
-        
-        # if provided, just use what's provided
-        else:
-            subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits, dtype=float)
+#         # for stochastic gradient descent, transform to (-inf, inf) domain
+#         gamma_shape_transf = jnp.sqrt(gamma_shape)
         
         
-        ### load exchangeabilities file
-        file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
-        with open(file_to_load,'rb') as f:
-            exch_mat = jnp.load(f)
+#         ### PARAMETER: mixture logits
+#         # if not provided, generate a logits vector of ones
+#         if 'subst_mix_logits' not in provided_args:
+#             subst_mix_logits = jnp.ones(argparse_obj.k_subst)
+        
+#         # if provided, just use what's provided
+#         else:
+#             subst_mix_logits = jnp.array(argparse_obj.subst_mix_logits, dtype=float)
         
         
-        ### OUTPUT DICTIONARIES
-        # dictionary of parameters
-        initialized_params = {'gamma_shape_transf': gamma_shape_transf,
-                              'subst_mix_logits': subst_mix_logits}
+#         ### load exchangeabilities file
+#         file_to_load = f'{argparse_obj.data_dir}/{argparse_obj.exch_file}'
+#         with open(file_to_load,'rb') as f:
+#             exch_mat = jnp.load(f)
         
-        # dictionary of hyperparameters
-        hparams = {'alphabet_size': argparse_obj.alphabet_size,
-                   'exch_mat': exch_mat}
         
-        return initialized_params, hparams
+#         ### OUTPUT DICTIONARIES
+#         # dictionary of parameters
+#         initialized_params = {'gamma_shape_transf': gamma_shape_transf,
+#                               'subst_mix_logits': subst_mix_logits}
+        
+#         # dictionary of hyperparameters
+#         hparams = {'alphabet_size': argparse_obj.alphabet_size,
+#                    'exch_mat': exch_mat}
+        
+#         return initialized_params, hparams
     
     
-    def conditional_logprobs_at_t(self, t, params_dict, hparams_dict):
-        """
-        ABOUT: calculate the conditional logP(x(t)|x(0)); could multiply by 
-               counts during training
-        JITTED: yes
-        WHEN IS THIS CALLED: every training loop, every timepoint
-        OUTPUTS: logP(substitutions)-
-                 (alphabet_size, alphabet_size, k_subst, k_equl) tensor
-        """
-        ### unpack parameters (what gets passed in/out of optax for updating)
-        gamma_shape_transf = params_dict['gamma_shape_transf']
+#     def conditional_logprobs_at_t(self, t, params_dict, hparams_dict):
+#         """
+#         ABOUT: calculate the conditional logP(x(t)|x(0)); could multiply by 
+#                counts during training
+#         JITTED: yes
+#         WHEN IS THIS CALLED: every training loop, every timepoint
+#         OUTPUTS: logP(substitutions)-
+#                  (alphabet_size, alphabet_size, k_subst, k_equl) tensor
+#         """
+#         ### unpack parameters (what gets passed in/out of optax for updating)
+#         gamma_shape_transf = params_dict['gamma_shape_transf']
         
-        ### unpack extra hyperparameters
-        equl_vecs = hparams_dict['equl_vecs']
-        k_subst = params_dict['subst_mix_logits'].shape[0]
-        exch_mat = hparams_dict['exch_mat']
+#         ### unpack extra hyperparameters
+#         equl_vecs = hparams_dict['equl_vecs']
+#         k_subst = params_dict['subst_mix_logits'].shape[0]
+#         exch_mat = hparams_dict['exch_mat']
         
-        ### turn gamma_shape_transf into gamma_shape
-        # make sure the gamma_shape_transf is not zero by shifting it to
-        # a small (but still detectable) number
-        gamma_shape_transf = jnp.where(gamma_shape_transf != 0,
-                                       gamma_shape_transf,
-                                       1e-10)
+#         ### turn gamma_shape_transf into gamma_shape
+#         # make sure the gamma_shape_transf is not zero by shifting it to
+#         # a small (but still detectable) number
+#         gamma_shape_transf = jnp.where(gamma_shape_transf != 0,
+#                                        gamma_shape_transf,
+#                                        1e-10)
         
-        # undo domain transformation
-        # gamma_shape_transf: (-inf, inf)
-        # gamma_shape: (0, inf); NOT inclusive of zero!
-        gamma_shape = jnp.square(gamma_shape_transf)
+#         # undo domain transformation
+#         # gamma_shape_transf: (-inf, inf)
+#         # gamma_shape: (0, inf); NOT inclusive of zero!
+#         gamma_shape = jnp.square(gamma_shape_transf)
         
         
-        # generate the rate matrix
-        # instead of k_subst, try passing in a shape of a parameter 
-        # (should be the same thing)
-        R_mat = self.generate_rate_matrix(equl_vecs, exch_mat, 
-                                          gamma_shape, k_subst)
+#         # generate the rate matrix
+#         # instead of k_subst, try passing in a shape of a parameter 
+#         # (should be the same thing)
+#         R_mat = self.generate_rate_matrix(equl_vecs, exch_mat, 
+#                                           gamma_shape, k_subst)
         
-        # normalize if desired
-        if self.norm:
-            R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
+#         # normalize if desired
+#         if self.norm:
+#             R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
         
-        # multiply by time
-        # log(exp(Rt)); (alph, alph, k_subst, k_equl)
-        logprob_substitution_at_t = R_mat * t
-        return logprob_substitution_at_t
+#         # multiply by time
+#         # log(exp(Rt)); (alph, alph, k_subst, k_equl)
+#         logprob_substitution_at_t = R_mat * t
+#         return logprob_substitution_at_t
     
     
-    def undo_param_transform(self, params_dict):
-        """
-        ABOUT: if any parameters have domain changes, undo those
-        JITTED: no
-        WHEN IS THIS CALLED: when writing params to JSON file
-        OUTPUTS: parameter dictionary, with transformed params
-        """
-        ### unpack parameters
-        gamma_shape_transf = params_dict['gamma_shape_transf']
-        subst_mix_logits = params_dict['subst_mix_logits']
+#     def undo_param_transform(self, params_dict):
+#         """
+#         ABOUT: if any parameters have domain changes, undo those
+#         JITTED: no
+#         WHEN IS THIS CALLED: when writing params to JSON file
+#         OUTPUTS: parameter dictionary, with transformed params
+#         """
+#         ### unpack parameters
+#         gamma_shape_transf = params_dict['gamma_shape_transf']
+#         subst_mix_logits = params_dict['subst_mix_logits']
         
         
-        ### undo the domain transformation
-        gamma_shape = jnp.square(gamma_shape_transf)
-        subst_mix_probs = softmax(subst_mix_logits)
+#         ### undo the domain transformation
+#         gamma_shape = jnp.square(gamma_shape_transf)
+#         subst_mix_probs = softmax(subst_mix_logits)
         
-        # also turn them into regular lists, for writing JSON
-        gamma_shape = np.array(gamma_shape).tolist()
-        subst_mix_probs = np.array(subst_mix_probs).tolist()
+#         # also turn them into regular lists, for writing JSON
+#         gamma_shape = np.array(gamma_shape).tolist()
+#         subst_mix_probs = np.array(subst_mix_probs).tolist()
         
         
-        ### add to parameter dictionary
-        out_dict = {}
-        out_dict['gamma_shape'] = gamma_shape
-        out_dict['subst_mix_probs'] = subst_mix_probs
+#         ### add to parameter dictionary
+#         out_dict = {}
+#         out_dict['gamma_shape'] = gamma_shape
+#         out_dict['subst_mix_probs'] = subst_mix_probs
         
-        return out_dict
+#         return out_dict
     
     
-    ###############   v__(extra functions placed below)__v   ###############
-    def generate_rate_matrix(self, equl_vecs, exch_mat, gamma_shape, k_subst):
-        """
-        ABOUT: calculating rate matrix R
-        JITTED: yes
-        WHEN IS THIS CALLED: whenever logprobs_at_t is called
-        OUTPUTS: (alphabet_size, alphabet_size, k_subst, k_equl) tensor
-        """
-        ### get rate classes
-        # (alphabet_size, alphabet_size, k_subst) (i,j,k)
-        rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
-        exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
+#     ###############   v__(extra functions placed below)__v   ###############
+#     def generate_rate_matrix(self, equl_vecs, exch_mat, gamma_shape, k_subst):
+#         """
+#         ABOUT: calculating rate matrix R
+#         JITTED: yes
+#         WHEN IS THIS CALLED: whenever logprobs_at_t is called
+#         OUTPUTS: (alphabet_size, alphabet_size, k_subst, k_equl) tensor
+#         """
+#         ### get rate classes
+#         # (alphabet_size, alphabet_size, k_subst) (i,j,k)
+#         rate_classes = self.generate_rate_classes(gamma_shape, k_subst)
+#         exch_mat_perClass = jnp.einsum('ij,k->ijk', exch_mat, rate_classes)
         
-        ### create rate matrix
-        # (alphabet_size, alphabet_size, k_subst, k_equl) (i,j,k,l)
-        # fill in values for i != j 
-        raw_rate_mat = jnp.einsum('ijk, jl -> ijkl', exch_mat_perClass, equl_vecs)
+#         ### create rate matrix
+#         # (alphabet_size, alphabet_size, k_subst, k_equl) (i,j,k,l)
+#         # fill in values for i != j 
+#         raw_rate_mat = jnp.einsum('ijk, jl -> ijkl', exch_mat_perClass, equl_vecs)
         
-        # mask out only (i,j) diagonals
-        mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
-        rate_mat_without_diags = jnp.einsum('ijkl,ij->ijkl', raw_rate_mat, mask_inv)
+#         # mask out only (i,j) diagonals
+#         mask_inv = jnp.abs(1 - jnp.eye(raw_rate_mat.shape[0]))
+#         rate_mat_without_diags = jnp.einsum('ijkl,ij->ijkl', raw_rate_mat, mask_inv)
 
-        # find rowsums i.e. sum across columns j
-        row_sums = rate_mat_without_diags.sum(axis=1)
-        row_sums_repeated = jnp.repeat(a=jnp.expand_dims(-row_sums, 1),
-                                        repeats=raw_rate_mat.shape[0],
-                                        axis=1)
-        mask = jnp.eye(raw_rate_mat.shape[0])
-        diags_to_add = jnp.einsum('ijkl,ij->ijkl', row_sums_repeated, mask)
+#         # find rowsums i.e. sum across columns j
+#         row_sums = rate_mat_without_diags.sum(axis=1)
+#         row_sums_repeated = jnp.repeat(a=jnp.expand_dims(-row_sums, 1),
+#                                         repeats=raw_rate_mat.shape[0],
+#                                         axis=1)
+#         mask = jnp.eye(raw_rate_mat.shape[0])
+#         diags_to_add = jnp.einsum('ijkl,ij->ijkl', row_sums_repeated, mask)
 
-        # add both
-        subst_rate_mat = rate_mat_without_diags + diags_to_add
+#         # add both
+#         subst_rate_mat = rate_mat_without_diags + diags_to_add
         
-        return subst_rate_mat
+#         return subst_rate_mat
     
-    def generate_rate_classes(self, gamma_shape, k_subst):
-        """
-        ABOUT: given the gamma shape, generate vector of rate classes by
-               interpolating between k_subst quantiles
-        JITTED: yes
-        WHEN IS THIS CALLED: whenever generate_rate_matrix is called
-        OUTPUTS: rate class vector, rho
-        """
-        # generate a one-parameter gamma distribution
-        gamma_dist = tfp.distributions.Gamma(concentration=gamma_shape,
-                                             rate=gamma_shape)
+#     def generate_rate_classes(self, gamma_shape, k_subst):
+#         """
+#         ABOUT: given the gamma shape, generate vector of rate classes by
+#                interpolating between k_subst quantiles
+#         JITTED: yes
+#         WHEN IS THIS CALLED: whenever generate_rate_matrix is called
+#         OUTPUTS: rate class vector, rho
+#         """
+#         # generate a one-parameter gamma distribution
+#         gamma_dist = tfp.distributions.Gamma(concentration=gamma_shape,
+#                                              rate=gamma_shape)
         
-        # determine which quantiles to generate; can't generate the
-        # quantile for 0 or 1, so replace these with 0.01 and 0.99 respectively
-        middle_quantiles = jnp.linspace(0, 1, k_subst+1)[1:-1]
-        points_to_gen = jnp.concatenate( [ jnp.array([0.01]),
-                                          middle_quantiles, 
-                                          jnp.array([0.99]) ] )
+#         # determine which quantiles to generate; can't generate the
+#         # quantile for 0 or 1, so replace these with 0.01 and 0.99 respectively
+#         middle_quantiles = jnp.linspace(0, 1, k_subst+1)[1:-1]
+#         points_to_gen = jnp.concatenate( [ jnp.array([0.01]),
+#                                           middle_quantiles, 
+#                                           jnp.array([0.99]) ] )
         
-        # retrieve the xvalues of the quantiles
-        xvals_at_quantiles = gamma_dist.quantile(points_to_gen)
+#         # retrieve the xvalues of the quantiles
+#         xvals_at_quantiles = gamma_dist.quantile(points_to_gen)
         
-        # rate classes are points BETWEEN these
-        rate_classes = (xvals_at_quantiles[1:] + xvals_at_quantiles[:-1]) / 2
+#         # rate classes are points BETWEEN these
+#         rate_classes = (xvals_at_quantiles[1:] + xvals_at_quantiles[:-1]) / 2
         
-        return rate_classes
+#         return rate_classes

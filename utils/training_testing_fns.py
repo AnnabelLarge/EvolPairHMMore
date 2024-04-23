@@ -77,7 +77,7 @@ def logsumexp_withZeros(x, axis):
 ### MAIN FUNCTIONS   ##########################################################
 ###############################################################################
 def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-             training_rngkey):
+             training_rngkey, loss_type):
     """
     Jit-able function to find log-likelihood of both substitutions and indels, 
       and collect gradients
@@ -93,6 +93,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > hparams_dict: hyperparams needed for run
         > training_rngkey: training rng key to add to hyperparameters 
           dictionary (may or may not be used)
+        > loss_type: either "conditional" or "joint"
     
     outputs:
         > loss: negative mean log likelihood
@@ -137,10 +138,11 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                          insCounts_persamp,
                                          logprob_equl)
         
-        # logP(deletions from ancestor sequence); dim: (batch, k_equl)
-        del_logprobs_perMix = jnp.einsum('bi,iy->by',
-                                         delCounts_persamp,
-                                         logprob_equl)
+        if loss_type == 'joint':
+            # logP(deletions from ancestor sequence); dim: (batch, k_equl)
+            del_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                             delCounts_persamp,
+                                             logprob_equl)
         
         
         ##################################################################
@@ -150,9 +152,14 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         def apply_model_at_t(t):
             ### 1.2.1: get the emission/transition matrices
             # retrieve substitution logprobs
-            logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
-                                                                  params_toTrack, 
-                                                                  hparams_dict)
+            if loss_type == 'joint':
+                logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
+                                                                params_toTrack, 
+                                                                hparams_dict)
+            elif loss_type == 'conditional':
+                logprob_substitution_at_t = subst_model.conditional_logprobs_at_t(t, 
+                                                                params_toTrack, 
+                                                                hparams_dict)
             
             # retrieve indel logprobs
             logprob_transition_at_t = indel_model.logprobs_at_t(t, 
@@ -235,10 +242,12 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                 jnp.expand_dims(equl_mix_logprobs, 0))
         logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
         
-        # deletions
-        with_dels_mix_weights = (del_logprobs_perMix + 
-                                 jnp.expand_dims(equl_mix_logprobs, 0))
-        logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
+        
+        if loss_type == 'joint':
+            # deletions
+            with_dels_mix_weights = (del_logprobs_perMix + 
+                                     jnp.expand_dims(equl_mix_logprobs, 0))
+            logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
         
         
         ### 1.3.4: logP(transitions)
@@ -256,8 +265,11 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         # (time, batch)
         logP_perTime = (logP_subs_perTime +
                         jnp.expand_dims(logP_ins,0) +
-                        jnp.expand_dims(logP_dels,0) +
                         logP_trans_perTime)
+        
+        if loss_type == 'joint':
+            logP_perTime = logP_perTime + jnp.expand_dims(logP_dels,0)
+        
         
         ### add marginalization_consts (time,)
         logP_perTime_withConst = (logP_perTime +
@@ -289,7 +301,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
 
 
 def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-            eval_rngkey):
+            eval_rngkey, loss_type):
     """
     Jit-able function to find log-likelihood of both substitutions and indels
     
@@ -303,6 +315,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > params_dict: model parameters to update with optax
         > hparams_dict: hyperparams needed for run
         > eval_rngkey: rng key for eval (may or may not be needed)
+        > loss_type: either "conditional" or "joint"
     
     outputs:
         > loss: negative mean log likelihood
@@ -345,10 +358,11 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                      insCounts_persamp,
                                      logprob_equl)
     
-    # logP(deletions from ancestor sequence); dim: (batch, k_equl)
-    del_logprobs_perMix = jnp.einsum('bi,iy->by',
-                                     delCounts_persamp,
-                                     logprob_equl)
+    if loss_type == 'joint':
+        # logP(deletions from ancestor sequence); dim: (batch, k_equl)
+        del_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                         delCounts_persamp,
+                                         logprob_equl)
     
     
     ##################################################################
@@ -358,9 +372,14 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     def apply_model_at_t(t):
         ### 1.2.1: get the emission/transition matrices
         # retrieve substitution logprobs
-        logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
-                                                              params_dict, 
-                                                              hparams_dict)
+        if loss_type == 'joint':
+            logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
+                                                                  params_dict, 
+                                                                  hparams_dict)
+        elif loss_type == 'conditional':
+            logprob_substitution_at_t = subst_model.conditional_logprobs_at_t(t, 
+                                                                  params_dict, 
+                                                                  hparams_dict)
         
         # retrieve indel logprobs
         logprob_transition_at_t = indel_model.logprobs_at_t(t, 
@@ -443,10 +462,11 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                             jnp.expand_dims(equl_mix_logprobs, 0))
     logP_ins = logsumexp_withZeros(with_ins_mix_weights, axis=1)
     
-    # deletions
-    with_dels_mix_weights = (del_logprobs_perMix + 
-                             jnp.expand_dims(equl_mix_logprobs, 0))
-    logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
+    if loss_type == 'joint':
+        # deletions
+        with_dels_mix_weights = (del_logprobs_perMix + 
+                                 jnp.expand_dims(equl_mix_logprobs, 0))
+        logP_dels = logsumexp_withZeros(with_dels_mix_weights, axis=1)
     
     
     ### 1.3.4: logP(transitions)
@@ -464,8 +484,10 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     # (time, batch)
     logP_perTime = (logP_subs_perTime +
                     jnp.expand_dims(logP_ins,0) +
-                    jnp.expand_dims(logP_dels,0) +
                     logP_trans_perTime)
+    
+    if loss_type == 'joint':
+        logP_perTime = logP_perTime + jnp.expand_dims(logP_dels,0)
     
     ### add marginalization_consts (time, batch)
     logP_perTime_withConst = (logP_perTime +

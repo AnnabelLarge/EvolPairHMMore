@@ -68,7 +68,7 @@ def logsumexp_withZeros(x, axis):
     return out
 
 
-def get_mats(t_arr, pairHMM, params_dict, hparams_dict):
+def get_mats(t_arr, pairHMM, params_dict, hparams_dict, loss_type):
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
     del pairHMM
@@ -95,9 +95,15 @@ def get_mats(t_arr, pairHMM, params_dict, hparams_dict):
     def apply_model_at_t(t):
         ### 1.2.1: get the emission/transition matrices
         # retrieve substitution logprobs
-        logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
-                                                              params_dict, 
-                                                              hparams_dict)
+        if loss_type == 'joint':
+            logprob_substitution_at_t = subst_model.joint_logprobs_at_t(t, 
+                                                                  params_dict, 
+                                                                  hparams_dict)
+        elif loss_type == 'conditional':
+            logprob_substitution_at_t = subst_model.conditional_logprobs_at_t(t, 
+                                                                  params_dict, 
+                                                                  hparams_dict)
+            
         
         # retrieve indel logprobs
         logprob_transition_at_t = indel_model.logprobs_at_t(t, 
@@ -137,7 +143,7 @@ def get_mats(t_arr, pairHMM, params_dict, hparams_dict):
     return out_dict
 
 
-def main():
+def calc_logprob(loss_type):
     #####################
     # INITIALIZE PARSER #
     #####################
@@ -150,7 +156,8 @@ def main():
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
         args = parser.parse_args(namespace=t_args)
-        
+    
+    args.loss_type = loss_type
     del f, parser, t_args
     
     
@@ -200,7 +207,8 @@ def main():
     ### 1.2: read data; build pytorch dataloaders, and get batch
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits)
+                           split_prefixes = args.test_dset_splits,
+                           subsOnly = args.subsOnly)
     test_dl = DataLoader(test_dset, 
                          batch_size = args.batch_size, 
                          shuffle = False,
@@ -261,7 +269,6 @@ def main():
     
     ### REMOVE unneeded variables
     # for clean variable explorer
-    del args
     del equl_model_params, subst_model_params, indel_model_params
     del equl_model_hparams, subst_model_hparams, indel_model_hparams
     del quantization_grid
@@ -269,16 +276,13 @@ def main():
     ############################
     ### 3: calculation setup   #
     ############################
-    # jit and summarize the alignment
-    summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                         static_argnames='max_seq_len')
-
     batch_max_seqlen = clip_batch_inputs(batch, 
                                          global_max_seqlen = test_global_max_seqlen)
     allCounts = summarize_alignment(batch, 
                                     max_seq_len = batch_max_seqlen, 
                                     alphabet_size=hparams['alphabet_size'], 
-                                    gap_tok=hparams['gap_tok'])
+                                    gap_tok=hparams['gap_tok'],
+                                    subsOnly = args.subsOnly)
     del batch_max_seqlen
     
     # get transition/emission matrices
@@ -286,7 +290,8 @@ def main():
     mat_dict = get_mats(t_arr=t_array, 
                         pairHMM=pairHMM, 
                         params_dict=params, 
-                        hparams_dict=hparams)
+                        hparams_dict=hparams,
+                        loss_type=args.loss_type)
     
     
     
@@ -342,11 +347,12 @@ def main():
     assert jnp.allclose(ins_logprobs_perMix[:,0], checkvals)
     del checkvals, b, counts_vec, true_logprob, i, count, logP
     
-    # logP(deletions from ancestor sequence); dim: (batch, k_equl)
-    # uses the same einsum recipe, so already been verified
-    del_logprobs_perMix = jnp.einsum('bi,iy->by',
-                                     delCounts_persamp,
-                                     logprob_equl)
+    if loss_type == 'joint':
+        # logP(deletions from ancestor sequence); dim: (batch, k_equl)
+        # uses the same einsum recipe, so already been verified
+        del_logprobs_perMix = jnp.einsum('bi,iy->by',
+                                         delCounts_persamp,
+                                         logprob_equl)
     
     
     ###########################################
@@ -466,14 +472,15 @@ def main():
     assert jnp.allclose(logP_ins, ins_logprobs_perMix[:,0])
     del with_ins_mix_weights
     
-    # deletions
-    with_dels_mix_weights = (del_logprobs_perMix + 
-                             jnp.expand_dims(equl_mix_logprobs, 0))
-    logP_dels = logsumexp_withZeros(x=with_dels_mix_weights, 
-                                    axis=1)
-    
-    assert jnp.allclose(logP_dels, del_logprobs_perMix[:,0])
-    del with_dels_mix_weights
+    if loss_type == 'joint':
+        # deletions
+        with_dels_mix_weights = (del_logprobs_perMix + 
+                                 jnp.expand_dims(equl_mix_logprobs, 0))
+        logP_dels = logsumexp_withZeros(x=with_dels_mix_weights, 
+                                        axis=1)
+        
+        assert jnp.allclose(logP_dels, del_logprobs_perMix[:,0])
+        del with_dels_mix_weights
     
     
     ### 4.3.4: logP(transitions)
@@ -496,8 +503,10 @@ def main():
     # (time, batch)
     logP_perTime = (logP_subs_perTime +
                     jnp.expand_dims(logP_ins,0) +
-                    jnp.expand_dims(logP_dels,0) +
                     logP_trans_perTime)
+    
+    if loss_type == 'joint':
+        logP_perTime = logP_perTime + jnp.expand_dims(logP_dels,0)
     
     # manual inspection of these element-wise sums show that jax numpy
     #   broadcasting is working ok
@@ -521,5 +530,16 @@ def main():
     
     ### 4.4.4: final loss is -mean(logP_perSamp) of this
     loss = -jnp.mean(logP_perSamp)
+
+
+def main():
+    calc_logprob(loss_type='conditional')
+    print('[SUB TEST PASSED] conditional logprob as expected')
+    print()
+    
+    calc_logprob(loss_type='joint')
+    print('[SUB TEST PASSED] joint logprob as expected')
+    print()
+    
     
     

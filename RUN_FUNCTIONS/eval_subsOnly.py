@@ -7,26 +7,15 @@ Created on Wed Jan 17 11:18:49 2024
 
 ABOUT:
 ======
-Load aligned pfams (and optionally calculate emission and transition 
-  counts from pair alignment inputs), load GGI indel parameters, and 
-  eval only
+Evaluate pair alignments based solely on substitution model and 
+  match sites (toss indel sites)
 
+Only used for single model (since there's no parameters to train)
 
 TODO:
 =====
-medium:
--------
-- remove the option to calculate counts on the fly, and just make this a 
-  separate pre-processing script (I don't ever use it...)
-
-
-far future:
------------
-For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new rate matrix for my specific pfam dataset?
-  https://github.com/songlab-cal/CherryML
-
-
+This is actually very similar to eval_pairHMM (just reading a preset config, 
+  instead of loading params); maybe combine them if you have the time?
 """
 import os
 import pickle
@@ -44,46 +33,38 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 # custom imports
-from utils.setup_utils import model_import_register
+from utils.setup_utils import setup_training_dir, model_import_register
 from utils.training_testing_fns import eval_fn
 
 
-def eval_pairhmm(args):
-    ###################################################
-    ### 0: FOLDER SETUP, MODEL/PARAM/HPARAM IMPORTS   #
-    ###################################################
-    ### 0.1: MODEL/PARAM LOADING, WKDIR SETUP
-    # create the eval working directory, if it doesn't exist
-    if args.eval_wkdir not in os.listdir():
-        os.mkdir(args.eval_wkdir)
+
+
+def eval_subsOnly(args):
+    #################################################
+    ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
+    #################################################
+    # previous version of code allowed the option for lazy dataloading, but
+    #   since GGI model is so small, just get rid of that
+    assert args.loadtype == 'eager'
     
-    # locate everything needed to load a model; add to main argparse object
-    training_dir = f'{args.training_wkdir}/model_ckpts/{args.training_runname}'
-    toLoad_file = f'{training_dir}/toLoad.json'
-    
-    with open(toLoad_file, 'r') as f:
-        args.__dict__.update(json.load(f))
-    del f, toLoad_file
-    
-    # load models and possibly register as pytrees
+    ### 0.1: DECIDE MODEL PARTS TO IMPORT, REGISTER AS PYTREES
     out = model_import_register(args)
-    subst_model, equl_model, indel_model, _ = out
+    subst_model, equl_model, indel_model, logfile_msg = out
     del out
     
-    
-    ### 0.2: DECIDE TRAINING MODE
-    # Use this training mode if you already have precalculated count matrices
+    ### 0.2: DECIDE DATA READING MODE
+    # Use this mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
-        to_add = ('Reading from precalculated counts matrices before'+
-                  ' training\n\n')
+        logfile_msg = ('Reading from precalculated counts matrices before'+
+                  ' eval\n\n')
         from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
         from onlyTrain.hmm_dataset import jax_collator as collator
         
-    # Use this training mode if you need to calculate emission and transition  
+    # Use this mode if you need to calculate emission and transition  
     #   counts from pair alignments
     elif not args.have_precalculated_counts:
-        to_add = ('Calculating counts matrices from alignments, then'+
-                  ' training\n\n')
+        logfile_msg = ('Calculating counts matrices from alignments, then'+
+                  ' eval\n\n')
         from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
         from calcCounts_Train.hmm_dataset import jax_collator as collator
         from calcCounts_Train.summarize_alignment import summarize_alignment
@@ -106,21 +87,17 @@ def eval_pairhmm(args):
                 return 1800
             else:
                 return global_max_seqlen
-    
-    
+        
+        
     ##############
     ### 1: SETUP #
     ##############
-    ### 1.1: output files, rng key (if needed)
-    # rng key
-    rngkey = jax.random.key(args.rng_seednum)
+    ### 1.1: output file for individual results per sample
+    output_persamp_file = f'{args.training_wkdir}/{args.runname}_LOGPROB-PER-SAMP.tsv'
+    output_ave_file = f'{args.training_wkdir}/{args.runname}_AVE-LOGPROB.tsv'
     
-    # output file for individual results per sample
-    output_persamp_file = f'{args.eval_wkdir}/{args.eval_runname}_LOGPROB-PER-SAMP.tsv'
-    output_ave_file = f'{args.eval_wkdir}/{args.eval_runname}_AVE-LOGPROB.tsv'
-    
-    
-    ### 1.2: read data; build pytorch dataloaders
+
+    ### 1.2: read data; build pytorch dataloaders 
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
                               split_prefixes = args.test_dset_splits,
@@ -139,6 +116,14 @@ def eval_pairhmm(args):
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
     
+    ### 1.4: column header for output eval depends on which probability is
+    ###      being calculated
+    if args.loss_type == 'conditional':
+        eval_col_title = 'logP(A_t|A_0,model)'
+    
+    elif args.loss_type == 'joint':
+        eval_col_title = 'logP(A_t,A_0|model)'
+    
     
     ###########################
     ### 2: INITIALIZE MODEL   #
@@ -148,7 +133,7 @@ def eval_pairhmm(args):
     
     # if this is the base model or the placeholder, use the equilibrium 
     #   distribution from TRAINING data
-    if args.equl_model_type in ['equl_base']:
+    if args.equl_model_type == 'equl_base':
         equl_model_hparams['equl_vecs_fromData'] = test_dset.retrieve_equil_dist()
     
     
@@ -177,124 +162,129 @@ def eval_pairhmm(args):
     # add grid step to hparams dictionary; needed for marginaling over time
     hparams['t_grid_step']= args.t_grid_step
     
-    # combine models under one pairHMM
+    # combine models under one pairHMM (just to be compatible with code; 
+    #   indel model is a placeholder)
     pairHMM = (equl_model, subst_model, indel_model)
     
     
-    ####################
-    ### 3: EVAL LOOP   #
-    ####################
+    ###############
+    ### 3: EVAL   #
+    ###############
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
-    jitted_eval_fn = jax.jit(eval_fn)
+    jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
                                              static_argnames=['max_seq_len',
                                                               'alphabet_size',
                                                               'gap_tok',
                                                               'subsOnly'])
-    
+     
+    ### 3.1: CHECK PERFORMANCE ON TEST SET
     eval_df_lst = []
     eval_sum_logP = 0
     for batch_idx,batch in enumerate(test_dl):
-        ### 3.1: EVAL ON ALL SAMPLES IN THE BATCH
-        # fold in epoch_idx and batch_idx for eval 
-        rngkey_for_eval = jax.random.fold_in(rngkey, batch_idx)
-    
+        # never used, but keep for compatibility
+        rngkey_for_eval = jax.random.fold_in(jax.random.key(0), -batch_idx)
+        
         # if you DON'T have precalculated counts matrices, will need to 
         #   clip the batch inputs
         if not args.have_precalculated_counts:
             batch_max_seqlen = clip_batch_inputs(batch, 
-                                                  global_max_seqlen = test_global_max_seqlen)
-            allCounts = summarize_alignment(batch, 
+                                                 global_max_seqlen = test_global_max_seqlen)
+            allCounts = summarize_alignment_jitted(batch, 
                                             max_seq_len = batch_max_seqlen, 
                                             alphabet_size=hparams['alphabet_size'], 
                                             gap_tok=hparams['gap_tok'],
                                             subsOnly = args.subsOnly)
             del batch_max_seqlen
-    
+        
         # if you have these counts, just unpack the batch
         elif args.have_precalculated_counts:
             allCounts = (batch[0], batch[1], batch[2], batch[3])
-    
+        
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
-                              t_arr = t_array, 
-                              pairHMM = pairHMM, 
-                              params_dict = params, 
-                              hparams_dict = hparams,
-                              eval_rngkey = rngkey_for_eval)
-    
-        _, batch_sum_logP, logprob_per_sample = 
+                             t_arr = t_array, 
+                             pairHMM = pairHMM, 
+                             params_dict = params, 
+                             hparams_dict = hparams,
+                             eval_rngkey = rngkey_for_eval,
+                             loss_type = args.loss_type)
+        
+        _, batch_sum_logP, logprob_per_sample = out
         del out
         
-        # add to eval_test_loss
         eval_sum_logP += batch_sum_logP
         del batch_sum_logP
         
-    
-        ### 3.2: RECORD RESULTS IN DATAFRAME
+        # record the log losses per sample
         # get the batch sample labels, associated metadata
         eval_sample_idxes = batch[-1]
         meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
         
         # add loss terms
-        meta_df_forBatch['logP(A_t,A_0|model)'] = logprob_per_sample
-                
+        meta_df_forBatch[eval_col_title] = logprob_per_sample
+        
         eval_df_lst.append(meta_df_forBatch)
-    
-    
-    # 3.3: COMBINE DATAFRAMES ACROSS BATCHES
-    # concate dataframes
+
+    # 3.2: COMBINE DATAFRAMES ACROSS BATCHES
+    # concat dataframes
     eval_df = pd.concat(eval_df_lst)
 
     # also get averge loss by aggregating with -jnp.mean()
     epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
-    del eval_sum_logP
+        del eval_sum_logP
+        
+    ### DEBUG OPTION
+    # # make sure this average matches the average from epoch_test_loss
+    #     loss_from_df = -eval_df[eval_col_title].mean()
+    #     assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
+    #     del loss_from_df
 
-    # make sure this average matches the average from epoch_test_loss
-        loss_from_df = -eval_df['logP(A_t,A_0|model)'].mean()
-        assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
-        del loss_from_df
-    
     # output to files
     with open(output_persamp_file,'w') as g:
         eval_df.to_csv(g, sep='\t')
     
     with open(output_ave_file, 'w') as g:
-        g.write(f'{args.eval_runname}\t') 
+        g.write(f'{args.runname}\t') 
         g.write(f'{epoch_eval_loss}\n')
+    
+    
 
-
-
+##########################################
+### BASIC CLI+JSON CONFIG IMPLEMENTATION #
+##########################################
 if __name__ == '__main__':
     import json
     import argparse 
-
+    import pandas as pd
+    import numpy as np
+    
     # for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
     assert len(jax.devices()) == 1, err_ms
     del err_ms
-
-    ### INITIALIZE PARSER
-    parser = argparse.ArgumentParser(prog='train_pairhmm')
-
+    
+    # INITIALIZE PARSER
+    parser = argparse.ArgumentParser(prog='eval_subsOnly')
+    
+    
     # config files required to run
     parser.add_argument('--config-file',
                         type = str,
                         required=True,
                         help='Load configs from file in json format.')
-
+    
+   
     # parse the arguments
     args = parser.parse_args()
-
-
-    ### load the config
+    
+    
     with open(args.config_file, 'r') as f:
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
         args = parser.parse_args(namespace=t_args)
-
-    # run evaluation function
-    eval_pairhmm(args)
     
+    # run training function
+    eval_subsOnly(args)

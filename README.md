@@ -21,7 +21,3 @@ Two ways to run this (triggered by `have_precalculated_counts`):
 
 ## Config File Fields
 NEED TO UPDATE THIS README!!!
-
-## TODO
-- make a script that loads model parameters and evaluates likelihood of selected dataset
-- update this readme file
