@@ -130,6 +130,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         # overwrite equl_vecs entry in the hparams dictionary
         hparams_dict['equl_vecs'] = equl_vecs
+        hparams_dict['logP_equl'] = logprob_equl
         
         ### 1.1.2: multiply counts by logprobs; this is logP 
         ###        PER EQUILIBRIUM DISTRIBUTION
@@ -350,6 +351,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     # overwrite equl_vecs entry in the hparams dictionary
     hparams_dict['equl_vecs'] = equl_vecs
+    hparams_dict['logP_equl'] = logprob_equl
     
     ### 1.1.2: multiply counts by logprobs; this is logP 
     ###        PER EQUILIBRIUM DISTRIBUTION

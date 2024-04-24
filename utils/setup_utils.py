@@ -22,9 +22,12 @@ def model_import_register(args):
     ### IMPORT SUBST MODEL #
     ########################
     # if nothing specified, then use subst_base
-    if args.subst_model_type == 'subst_base':
-        from model_blocks.protein_subst_models import subst_base as subst_model
+    if args.subst_model_type == 'subs_mixture':
+        from model_blocks.protein_subst_models import subs_mixture as subst_model
     
+    elif args.subst_model_type == 'subst_base':
+        from model_blocks.protein_subst_models import subst_base as subst_model
+        
     ### come back to this model if you make rate classes depend on other 
     ###   factors (this is kind of useless right now)
     # elif args.subst_model_type == 'LG_mixture':

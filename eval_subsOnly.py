@@ -234,7 +234,7 @@ def eval_subsOnly(args):
 
     # also get averge loss by aggregating with -jnp.mean()
     epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
-        del eval_sum_logP
+    del eval_sum_logP
         
     ### DEBUG OPTION
     # # make sure this average matches the average from epoch_test_loss
