@@ -22,11 +22,15 @@ def model_import_register(args):
     ### IMPORT SUBST MODEL #
     ########################
     # if nothing specified, then use subst_base
-    if args.subst_model_type == 'subs_mixture':
-        from model_blocks.protein_subst_models import subs_mixture as subst_model
+    if args.subst_model_type == 'subst_mixture':
+        from model_blocks.protein_subst_models import subst_mixture as subst_model
+        logfile_msg1 = (f'1.) substitution model: subst_mixture;'+
+                        f' (norm: {args.norm}, num_mixes: {args.k_subst})\n')
     
     elif args.subst_model_type == 'subst_base':
         from model_blocks.protein_subst_models import subst_base as subst_model
+        logfile_msg1 = (f'1.) substitution model: subst_base;'+
+                        f' (norm: {args.norm})\n')
         
     ### come back to this model if you make rate classes depend on other 
     ###   factors (this is kind of useless right now)
@@ -48,6 +52,9 @@ def model_import_register(args):
         from model_blocks.equl_distr_models import equl_base as equl_model
         args.equl_model_type = 'equl_base'
     
+    # all models can use the same logfile template
+    logfile_msg2 = (f'2.) equilibrium distribution: {args.equl_model_type}\n')
+    
     
     ########################
     ### IMPORT INDEL MODEL #
@@ -55,17 +62,23 @@ def model_import_register(args):
     # if nothing specified, then use no indel model
     if args.indel_model_type == 'GGI_single':
         from model_blocks.indel_models import GGI_single as indel_model
+        logfile_msg3 = (f'3.) indel model: GGI_single;'+
+                        f'(tie_parms: {args.tie_params})\n')
     
     elif args.indel_model_type == 'TKF91_single':
         from model_blocks.indel_models import TKF91_single as indel_model
+        logfile_msg3 = (f'3.) indel model: TKF91_single;'+
+                        f'(tie_parms: {args.tie_params})\n')
     
     elif args.indel_model_type == 'GGI_mixture':
         from model_blocks.indel_models import GGI_mixture as indel_model
+        logfile_msg3 = (f'3.) indel model: GGI_mixture;'+
+                        f' (tie_parms: {args.tie_params}, num_ixes: {args.k_indel})\n')
         
     else:
         from model_blocks.indel_models import no_indel as indel_model
         args.indel_model_type = 'no_indel'
-        
+        logfile_msg3 = (f'3.) indel model: no_indel\n')
     
     
     #################################
@@ -86,26 +99,23 @@ def model_import_register(args):
     ### INITIALIZE #
     ################
     subst_model_instance = subst_model(args.norm)
-    logfile_msg1 = (f'1.) substitution model: {args.subst_model_type};'+
-                    f' (norm: {args.norm})\n')
-    
     equl_model_instance = equl_model()
-    logfile_msg2 = (f'2.) equilibrium distribution: {args.equl_model_type}\n')
     
     if 'tie_params' in vars(args).keys():
         indel_model_instance = indel_model(args.tie_params)
-        logfile_msg3 = (f'3.) indel model: {args.indel_model_type};'+
-                        f'(tie_parms: {args.tie_params})\n')
     else:
         indel_model_instance = indel_model()
-        logfile_msg3 = (f'3.) indel model: {args.indel_model_type}')
+    
+    # also record what loss you're using to train
+    logfile_msg4 = f'likelihood fn: {args.loss_type}\n'
         
     
     # add this model info to the top of the logfile
     out_logfile_msg = ('TRAINING PairHMM composed of:\n' +
                         logfile_msg1 +
                         logfile_msg2 +
-                        logfile_msg3 
+                        logfile_msg3 +
+                        logfile_msg4
                         )
     
     return (subst_model_instance, equl_model_instance, indel_model_instance, 

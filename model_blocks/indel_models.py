@@ -456,7 +456,6 @@ class GGI_mixture(GGI_single):
             mu = np.array(mu).tolist()
             x = np.array(x).tolist()
             y = np.array(y).tolist()
-            indel_mix_probs = np.array(indel_mix_probs).tolist()
             
             # add to output dictionary
             out_dict['lam'] = lam
@@ -468,8 +467,8 @@ class GGI_mixture(GGI_single):
             ### mu takes on value of lambda, y takes on value of x
             # combine lambda and mu under label "indel rate"
             # combine x and y under label "extension prob"
-            indel_rate = np.array(lam).to_list()
-            extension_prob = np.array(x).to_list()
+            indel_rate = np.array(lam).tolist()
+            extension_prob = np.array(x).tolist()
             
             # add to output dictionary
             out_dict['indel_rate'] = indel_rate
@@ -477,7 +476,7 @@ class GGI_mixture(GGI_single):
         
         
         ### add indel_mix_probs to the output dictionary too
-        out_dict['indel_mix_probs'] = indel_mix_probs
+        out_dict['indel_mix_probs'] = np.array(indel_mix_probs).tolist()
         
         return out_dict
 

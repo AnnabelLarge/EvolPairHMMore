@@ -97,7 +97,7 @@ def train_pairhmm(args):
                 return 1800
             else:
                 return global_max_seqlen
-        
+    
     logfile_msg = logfile_msg + to_add
     del to_add
     
@@ -267,7 +267,6 @@ def train_pairhmm(args):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
-            # DEBUG: turned jit off
             out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
@@ -494,14 +493,15 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    args.config_file = 'TEST_train_subsMix.json'
     
     
     with open(args.config_file, 'r') as f:

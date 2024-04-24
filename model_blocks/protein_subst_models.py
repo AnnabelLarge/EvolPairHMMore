@@ -13,7 +13,7 @@ Protein substitution models (i.e. the EMISSIONS from match states):
 1. subst_base: single substitution model with externally provided 
      exchangeability matrix (I use LG08 matrix)
      
-2. subs_mixture: mixture of substitution models, given by set list of 
+2. subst_mixture: mixture of substitution models, given by set list of 
      exchangeability matrices
 
 
@@ -118,7 +118,7 @@ class subst_base:
         
         # generate the rate matrix
         R_mat = self.generate_rate_matrix(equl_vecs, exch_mat)
-    
+        
         # normalize if desired
         if self.norm:
             R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
@@ -237,7 +237,7 @@ class subst_base:
 ###############################################################################
 # inherits the following methods: _init_, conditional_logprobs_at_t, 
 #   joint_logprobs_at t, norm_rate_matrix, and jax pytree info
-class subs_mixture(subst_base):
+class subst_mixture(subst_base):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters and hyperparams
@@ -269,7 +269,7 @@ class subs_mixture(subst_base):
         # (alph, alph, k_subst)
         exch_mat = []
         for file in argparse_obj.exch_files:
-            with open(f'{exchangeability_matrices}/{file}', 'rb') as f:
+            with open(f'exchangeability_matrices/{file}', 'rb') as f:
                 one_mat = jnp.expand_dims(jnp.load(f), -1)
             exch_mat.append(one_mat)
         exch_mat = jnp.concatenate(exch_mat, -1)

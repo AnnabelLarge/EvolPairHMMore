@@ -23,7 +23,7 @@
 	"subst_model_type": "subst_base",
 	"norm": true,
 	"subsOnly": false,
-	"exch_file": "LG08_exchangeability_r.npy",
+	"exch_files": "LG08_exchangeability_r.npy",
 	"alphabet_size": 20,
 	"gap_tok": 63,
 
