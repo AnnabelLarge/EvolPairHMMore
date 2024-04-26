@@ -49,7 +49,7 @@ from utils.training_testing_fns import train_fn, eval_fn
 
 
 
-def train_pairhmm(args):
+def check_grads(args):
     #################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
     #################################################
@@ -97,7 +97,7 @@ def train_pairhmm(args):
                 return 1800
             else:
                 return global_max_seqlen
-        
+    
     logfile_msg = logfile_msg + to_add
     del to_add
     
@@ -108,22 +108,22 @@ def train_pairhmm(args):
     ### 1.1: rng key, folder setup, etc.
     # setup folders; manually create model checkpoint directory (i.e. what 
     #   orbax would normally do for you)
-    setup_training_dir(args)
-    if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
-        os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
-    os.mkdir(args.model_ckpts_dir)
+    # setup_training_dir(args)
+    # if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
+    #     os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
+    # os.mkdir(args.model_ckpts_dir)
     
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
     
-    # create a new logfile to record training loss in an ascii file
-    # can eyeball this faster than a tensorboard thing
-    with open(args.logfile_name,'w') as g:
-        g.write(logfile_msg)
-        g.write('TRAINING PROG:\n')
+    # # create a new logfile to record training loss in an ascii file
+    # # can eyeball this faster than a tensorboard thing
+    # with open(args.logfile_name,'w') as g:
+    #     g.write(logfile_msg)
+    #     g.write('TRAINING PROG:\n')
     
-    # setup tensorboard writer
-        writer = SummaryWriter(args.tboard_dir)
+    # # setup tensorboard writer
+    #     writer = SummaryWriter(args.tboard_dir)
     
     
     ### 1.2: read data; build pytorch dataloaders 
@@ -157,13 +157,13 @@ def train_pairhmm(args):
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
     
-    ### 1.4: column header for output eval depends on which probability is
-    ###      being calculated
-    if args.loss_type == 'conditional':
-        eval_col_title = 'logP(A_t|A_0,model)'
+    # ### 1.4: column header for output eval depends on which probability is
+    # ###      being calculated
+    # if args.loss_type == 'conditional':
+    #     eval_col_title = 'logP(A_t|A_0,model)'
     
-    elif args.loss_type == 'joint':
-        eval_col_title = 'logP(A_t,A_0|model)'
+    # elif args.loss_type == 'joint':
+    #     eval_col_title = 'logP(A_t,A_0|model)'
         
     
     
@@ -219,7 +219,7 @@ def train_pairhmm(args):
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
     jitted_train_fn = jax.jit(train_fn, static_argnames='loss_type')
-    jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
+    # jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
                                              static_argnames=['max_seq_len',
@@ -227,14 +227,11 @@ def train_pairhmm(args):
                                                               'gap_tok',
                                                               'subsOnly'])
         
-    # quit training if test loss increases for X epochs in a row
-    prev_test_loss = 9999
-    early_stopping_counter = 0
+    joint_lam_grad = []
+    joint_x_grad = []
+    cond_lam_grad = []
+    cond_x_grad = []
     
-    # when to save a model's parameters
-    best_epoch = -1
-    best_train_loss = 9999
-    best_test_loss = 9999
     for epoch_idx in tqdm(range(args.num_epochs)):
         # top of the epoch, these aren't yet determined
         epoch_train_loss = 9999
@@ -266,211 +263,43 @@ def train_pairhmm(args):
             elif args.have_precalculated_counts:
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
-            # take a step using minibatch gradient descent
-            # DEBUG: turned jit off
-            out = jitted_train_fn(all_counts = allCounts, 
+            ### GRADIENTS UNDER JOINT LOSS
+            joint_out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
                                   params_dict = params, 
                                   hparams_dict = hparams,
                                   training_rngkey = rngkey_for_training,
-                                  loss_type = args.loss_type)
-            _, batch_train_sum_logP, param_grads = out
-            del out
-
+                                  loss_type = "joint")
+            _, _, joint_param_grads = joint_out
+            
+            ### GRADIENTS UNDER CONDITIONAL LOSS
+            cond_out = jitted_train_fn(all_counts = allCounts, 
+                                  t_arr = t_array, 
+                                  pairHMM = pairHMM, 
+                                  params_dict = params, 
+                                  hparams_dict = hparams,
+                                  training_rngkey = rngkey_for_training,
+                                  loss_type = "conditional")
+            _, _, cond_param_grads = cond_out
+            
+            # record gradients
+            joint_lam_grad.append(joint_param_grads['lam_transf'].item())
+            joint_x_grad.append(joint_param_grads['x_transf'].item())
+            cond_lam_grad.append(cond_param_grads['lam_transf'].item())
+            cond_x_grad.append(cond_param_grads['x_transf'].item())
             
             # update the parameters dictionary with optax
-            updates, opt_state = tx.update(param_grads, opt_state)
+            # update with conditional param gradients, for now
+            updates, opt_state = tx.update(cond_param_grads, opt_state)
             params = optax.apply_updates(params, updates)
             
-            # add to total loss for this epoch
-            epoch_train_sum_logP += batch_train_sum_logP
-            del batch_train_sum_logP
-        
-        
-        ### 3.3: GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD
-        # aggregate with the equilvalent of -jnp.mean()
-        epoch_train_loss = float( -( epoch_train_sum_logP/len(training_dset) ) )
-        writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
-        # if the training loss is nan, stop training
-        if jnp.isnan(epoch_train_loss):
-            with open(args.logfile_name,'a') as g:
-                g.write(f'NaN training loss at epoch {epoch_idx}')
-            raise ValueError(f'NaN training loss at epoch {epoch_idx}')
-        
-        # free up variables
-        del batch, allCounts, epoch_train_sum_logP
-
-
-        ### 3.4: IF THE TRAINING LOSS IS BETTER, SAVE MODEL WITH PARAMETERS
-        if epoch_train_loss < best_train_loss:
-            # swap the flag
-            record_results = True
-            
-            # output all possible things needed to load a model later
-            OUT_forLoad = {'subst_model_type': args.subst_model_type,
-                           'equl_model_type': args.equl_model_type,
-                           'indel_model_type': args.indel_model_type,
-                           'norm': args.norm,
-                           'alphabet_size': args.alphabet_size,
-                           't_grid_center': args.t_grid_center,
-                           't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grid_num_steps,
-                           'subsOnly': args.subsOnly,
-                           'exch_files': args.exch_files
-                           }
-            
-            if 'diffrax_params' in dir(args):
-                OUT_forLoad['diffrax_params'] = args.diffrax_params
-            
-            # add (possibly transformed) parameters
-            for key, val in params.items():
-                if val.shape == (1,):
-                    OUT_forLoad[key] = val.item()
-                else:
-                    OUT_forLoad[key] = np.array(val).tolist()
-            
-            # undo any possible parameter transformations and add to 
-            #   1.) the dictionary of all possible things needed to load a 
-            #   model, and 2.) a human-readable JSON of parameters
-            OUT_params = {}
-            for modelClass in pairHMM:
-                params_toWrite = modelClass.undo_param_transform(params)
-                OUT_forLoad = {**OUT_forLoad, **params_toWrite}
-                OUT_params = {**OUT_params, **params_toWrite}
-
-            OUT_params['epoch_of_training']= epoch_idx
-            
-            # dump json files
-            with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
-                json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
-            del OUT_forLoad
-            
-            with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
-                json.dump(OUT_params, g, indent="\t", sort_keys=True)
-            del OUT_params
-            
-            # record to log file
-            with open(args.logfile_name,'a') as g:
-                g.write(f'New best training loss at epoch {epoch_idx}: {epoch_train_loss}\n')
-            
-            # update save criteria
-            best_epoch = epoch_idx
-            best_train_loss = epoch_train_loss
-    
-        
-        ### 3.5: CHECK PERFORMANCE ON HELD-OUT TEST SET
-        eval_df_lst = []
-        epoch_test_sum_logP = 0
-        for batch_idx,batch in enumerate(test_dl):
-            # fold in epoch_idx and batch_idx for eval (use negative value, 
-            #   to have distinctly different random keys from training)
-            rngkey_for_eval = jax.random.fold_in(rngkey, -(epoch_idx+batch_idx))
-            
-            # if you DON'T have precalculated counts matrices, will need to 
-            #   clip the batch inputs
-            if not args.have_precalculated_counts:
-                batch_max_seqlen = clip_batch_inputs(batch, 
-                                                     global_max_seqlen = test_global_max_seqlen)
-                allCounts = summarize_alignment_jitted(batch, 
-                                                max_seq_len = batch_max_seqlen, 
-                                                alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'],
-                                                subsOnly = args.subsOnly)
-                del batch_max_seqlen
-            
-            # if you have these counts, just unpack the batch
-            elif args.have_precalculated_counts:
-                allCounts = (batch[0], batch[1], batch[2], batch[3])
-            
-            # evaluate batch loss
-            out = jitted_eval_fn(all_counts = allCounts, 
-                                 t_arr = t_array, 
-                                 pairHMM = pairHMM, 
-                                 params_dict = params, 
-                                 hparams_dict = hparams,
-                                 eval_rngkey = rngkey_for_eval,
-                                 loss_type = args.loss_type)
-            
-            _, batch_test_sum_logP, logprob_per_sample = out
-            del out
-            
-            epoch_test_sum_logP += batch_test_sum_logP
-            del batch_test_sum_logP
-            
-            # if record_results is triggered (by section 2.4), also record
-            # the log losses per sample
-            if record_results:
-                # get the batch sample labels, associated metadata
-                eval_sample_idxes = batch[-1]
-                meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
-                
-                # add loss terms
-                meta_df_forBatch[eval_col_title] = logprob_per_sample
-                
-                eval_df_lst.append(meta_df_forBatch)
-
-        # get the average epoch_test_loss by aggregating via -jnp.mean(); record
-        epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
-        writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
-        del epoch_test_sum_logP, batch
-
-        # output the metadata + losses dataframe, along with what epoch 
-        #   you're recording results; place this outside of folders
-        if record_results:
-            eval_df = pd.concat(eval_df_lst)
-            
-            ### DEBUG OPTION
-            # # make sure this average matches the average from epoch_test_loss
-            # loss_from_df = -eval_df[eval_col_title].mean()
-            # assert jnp.allclose(loss_from_df, epoch_test_loss, rtol=1e-3)
-            # del loss_from_df
-            
-            
-            with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
-                g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
-                eval_df.to_csv(g, sep='\t')
-            
-            # also make sure to record "best_test_loss" i.e. the test loss
-            #   whenever best training loss is reached
-            best_test_loss = epoch_test_loss
-
-
-        ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
-        ###      stop training; reset counter if the loss decreases again 
-        ###      (this is directly from Ian)
-        if (jnp.allclose (prev_test_loss, 
-                          jnp.minimum (prev_test_loss, epoch_test_loss), 
-                          rtol=1e-05) ):
-            early_stopping_counter += 1
-        else:
-            early_stopping_counter = 0
-        
-        if early_stopping_counter == args.patience:
-            with open(args.logfile_name,'a') as g:
-                g.write(f'\n\nEARLY STOPPING AT EPOCH {epoch_idx}:\n')
-                g.write(f'Best epoch: {best_epoch}\n')
-                g.write(f'Best training loss: {best_train_loss}\n')
-                g.write(f'Test loss at best epoch: {best_test_loss}\n')
-                
-            # rage quit
-            break
-        
-        # remember this epoch's loss for next iteration
-        prev_test_loss = epoch_test_loss
-        
-        
-    ### when you're done with the function, close the tensorboard writer
-    writer.close()
-
-
-    ### if early stopping was never triggered, record results at last epoch
-    if early_stopping_counter != args.patience:
-        with open(args.logfile_name,'a') as g:
-            g.write(f'\n\nRegular stopping after {epoch_idx} full epochs:\n')
-            g.write(f'Final training loss: {epoch_train_loss}\n')
-            g.write(f'Final test loss: {epoch_test_loss}\n')
+    df = pd.DataFrame({'joint_lam_grad':joint_lam_grad,
+                       'joint_x_grad':joint_x_grad,
+                       'cond_lam_grad':cond_lam_grad,
+                       'cond_x_grad':cond_x_grad})
+    return df
 
     
     
@@ -494,14 +323,19 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    args.config_file = 'example_config_train_single.json'
+    
+    
+    # this is specifically made for GGI-WT
+    assert 'GGI-WT' in args.config_file
     
     
     with open(args.config_file, 'r') as f:
@@ -510,4 +344,19 @@ if __name__ == '__main__':
         args = parser.parse_args(namespace=t_args)
     
     # run training function
-    train_pairhmm(args)
+    grads = check_grads(args)
+    
+    # see if gradients match
+    print('Lam_transf gradients match?')
+    print((np.abs(grads['joint_lam_grad'] - grads['cond_lam_grad']) < 1e-4).all())
+    print()
+    
+    print('x_transf gradients match?')
+    print((np.abs(grads['joint_x_grad'] - grads['cond_x_grad']) < 1e-4).all())
+    print()
+    
+    
+    grads.to_csv('GRADIENTS_{args.config_file.replace(".json",".tsv")}', sep='\t')
+    
+    
+    
