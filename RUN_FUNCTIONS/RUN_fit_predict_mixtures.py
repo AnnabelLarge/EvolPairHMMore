@@ -513,15 +513,14 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    # parser.add_argument('--config-file',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file in json format.')
+    parser.add_argument('--config-file',
+                        type = str,
+                        required=True,
+                        help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
-    args.config_file = 'CONFIG_example.json'
     
     
     with open(args.config_file, 'r') as f:

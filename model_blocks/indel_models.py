@@ -484,8 +484,8 @@ class GGI_mixture(GGI_single):
 ###############################################################################
 ### single TKF91 indel model   ################################################
 ###############################################################################
-# inherit __init__ and methods for tree flattening/unflattening from GGI_single
-class TKF91_single(GGI_single):
+# inherit methods for tree flattening/unflattening from no_indel
+class TKF91_single(no_indel):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -494,16 +494,16 @@ class TKF91_single(GGI_single):
         OUTPUTS: dictionary of initial parameters for optax (if any)
         
         params to fit:
-            - lambda (insertion rates)
+            - lambda (birth rate)
               > DEFAULT: 0.5
               > DOMAIN RESTRICTION: greater than 0
                   
-            - mu (deletion rates)
+            - mu (death rate)
               > DEFAULT:  0.5
               > DOMAIN RESTRICTION: greater than 0
                   
         hparams to pass on (or infer):
-            - diffrax params (from argparse)
+            - none
         """
         provided_args = dir(argparse_obj)
         
@@ -536,10 +536,7 @@ class TKF91_single(GGI_single):
             initialized_params = {**initialized_params, **to_add}
             del to_add
         
-        ### HPARAMS: create hyperparams dictionary
-        hparams = {'diffrax_params': argparse_obj.diffrax_params}
-        
-        return initialized_params, hparams
+        return initialized_params, dict()
         
         
     def logprobs_at_t(self, t, params_dict, hparams_dict):
@@ -553,7 +550,7 @@ class TKF91_single(GGI_single):
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
         
-        
+         
         if not self.tie_params:
             ### mu and y are independent params; unpack and undo domain transf
             mu_transf = params_dict['mu_transf']
@@ -563,30 +560,36 @@ class TKF91_single(GGI_single):
             ### mu takes on value of lambda
             mu = lam
         
+        ### forms taken from Ian's 2020 paper
+        # alpha: ancestral residue survival
+        alpha = self.calc_alpha(t, mu)
         
-        ### for TKF91: x = y = 0
-        x = jnp.array([0])
-        y = jnp.array([0])
+        # beta: if one or more descendants exist, probability of more insertions
+        beta = self.calc_beta(t, lam, mu)
+        
+        # gamma: probability of inserts if ancestor died
+        gamma = 1 - (mu * beta) / ( lam * (1-alpha) )
         
         
-        ### unpack the hyparpameters
-        diffrax_params = hparams_dict['diffrax_params']
-        alphabet_size = hparams_dict['alphabet_size']
+        ### entries in the transition matrix
+        # M -> M, I, D
+        a = (1 - beta) * alpha
+        b = beta
+        c = (1 - beta) * (1 - alpha)
         
-        # indel params is a tuple of four elements; each elem is (k_indel,)
-        # in this case, each elem is of size (1,)
-        indel_params = (lam, mu, x, y)
+        # I -> M, I, D
+        f = (1 - beta) * alpha
+        g = beta
+        h = (1 - beta) * (1 - alpha)
         
-        # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
-        # (3, 3, k_indel); in this case, k_indel=1
-        transmat = transitionMatrix (t, 
-                                     indel_params, 
-                                     alphabet_size,
-                                     **diffrax_params)
+        # D -> M, I, D
+        p = (1 - gamma) * alpha
+        q = gamma
+        r = (1 - gamma) * (1 - alpha)
         
-        # if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
-        logprob_transition_at_t = jnp.log(transmat)
+        logprob_transition_at_t = jnp.array([[a,b,c],
+                                             [f,g,h],
+                                             [p,q,r]])
         
         return logprob_transition_at_t
     
@@ -618,4 +621,13 @@ class TKF91_single(GGI_single):
             
         return out_dict
     
+    ################   v__(extra functions placed below)__v   ################
+    def calc_alpha(self, t, mu):
+        return jnp.exp( -mu * t )
+    
+    
+    def calc_beta(self, t, lam, mu):
+        num = lam * ( jnp.exp( -lam*t ) - jnp.exp( -mu*t ) )
+        denom = mu * jnp.exp( -lam*t ) - lam * exp( -mu*t )
+        return num/denom
     
