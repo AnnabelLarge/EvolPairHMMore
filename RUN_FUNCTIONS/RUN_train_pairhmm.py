@@ -503,6 +503,7 @@ if __name__ == '__main__':
    
     # parse the arguments
     args = parser.parse_args()
+    # args.config_file = 'cfig_pfams.json'
     
     
     with open(args.config_file, 'r') as f:

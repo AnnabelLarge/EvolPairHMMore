@@ -38,7 +38,7 @@ def logsumexp_withZeros(x, axis):
 
 
 def eval_best_mixture(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-                      eval_rngkey, loss_type, indices):
+                      eval_rngkey, loss_type):
     """
     After training a mixture model, determine which mixture is most optimal
         for each sample; akin to .transform() function from scipy.stats
@@ -54,7 +54,6 @@ def eval_best_mixture(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > hparams_dict: hyperparams needed for run
         > eval_rngkey: rng key for eval (may or may not be needed)
         > loss_type: either "conditional" or "joint"
-        > indices = index matrix from jnp.meshgrid
     
     outputs:
         > loss: negative mean log likelihood
@@ -73,6 +72,7 @@ def eval_best_mixture(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     # need r, the geometric grid step for generating timepoints
     r = hparams_dict['t_grid_step']
+    indices = hparams_dict['mixture_idx_matrix']
     
     # if equlibrium distribution is a dirichlet mixture, will need a random
     # key for it

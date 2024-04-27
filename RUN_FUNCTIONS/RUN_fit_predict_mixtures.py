@@ -29,8 +29,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 # custom imports
 from utils.setup_utils import setup_training_dir, model_import_register
-from utils.training_testing_fns import train_fn
-from utils.eval_best_mixture import eval_best_mixture as eval_fn
+from utils.training_testing_fns import train_fn, eval_fn
+from utils.eval_best_mixture import eval_best_mixture as eval_best_mixture
 
 
 
@@ -192,22 +192,46 @@ def fit_predict_pairhmm_mixture(args):
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
     
+    
+    ### 2.5: get all possible combinations of mixtures
+    if 'subst_mix_logits' in params.keys():
+        subs_idx = jnp.arange(0, params['subst_mix_logits'].shape[0])
+    else:
+        subs_idx = jnp.array([0])
+    
+    if 'equl_mix_logits' in params.keys():
+        equl_idx = jnp.arange(0, params['equl_mix_logits'].shape[0])
+    else:
+        equl_idx = jnp.array([0])
+    
+    if 'indel_mix_logits' in params.keys():
+        indel_idx = jnp.arange(0, params['indel_mix_logits'].shape[0])
+    else:
+        indel_idx = jnp.array([0])
+    
+    X,Y,Z = jnp.meshgrid(subs_idx, equl_idx, indel_idx)
+    
+    # indices is (num_combos, 3); add to hparams
+    # col0 = subs; col1 = equl; col2 = indel
+    indices = jnp.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
+    hparams['mixture_idx_matrix'] = indices
+    del X,Y,Z, subs_idx, equl_idx, indel_idx
+
+    
+    ########################
+    ### 3: TRAINING LOOP   #
+    ########################
+    ### 3.1: SETUP FOR TRAINING LOOP
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
     jitted_train_fn = jax.jit(train_fn, static_argnames='loss_type')
-    jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
                                              static_argnames=['max_seq_len',
                                                               'alphabet_size',
                                                               'gap_tok',
                                                               'subsOnly'])
-    
-    
-    ########################
-    ### 3: TRAINING LOOP   #
-    ########################
-    ### 3.1: SETUP FOR TRAINING LOOP
+
     # initialize optax
     tx = optax.adam(args.learning_rate)
     opt_state = tx.init(params)
@@ -287,6 +311,7 @@ def fit_predict_pairhmm_mixture(args):
             best_params = params
             best_epoch = epoch_idx
             best_train_loss = epoch_train_loss
+
             
             
         ### 3.5: EARLY STOPPING: if loss increases for X epochs in a row, 
@@ -322,40 +347,25 @@ def fit_predict_pairhmm_mixture(args):
             g.write(f'Final training loss: {epoch_train_loss}\n')
     
     # make sure to not use an old version of params
-    del params
+    del params, epoch_idx
     
     
     ##############################
     ### 4: EVALUATE BEST MIXTURE #
     ##############################
-    ### 4.1: get all possible combinations of mixtures
-    if 'subst_mix_logits' in best_params.keys():
-        subs_idx = jnp.arange(0, best_params['subst_mix_logits'].shape[0])
-    else:
-        subs_idx = jnp.array([0])
-    
-    if 'equl_mix_logits' in best_params.keys():
-        equl_idx = jnp.arange(0, best_params['equl_mix_logits'].shape[0])
-    else:
-        equl_idx = jnp.array([0])
-    
-    if 'indel_mix_logits' in best_params.keys():
-        indel_idx = jnp.arange(0, best_params['indel_mix_logits'].shape[0])
-    else:
-        indel_idx = jnp.array([0])
-    
-    X,Y,Z = jnp.meshgrid(subs_idx, equl_idx, indel_idx)
-    
-    # indices is (num_combos, 3)
-    # col0 = subs; col1 = equl; col2 = indel
-    indices = jnp.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
-    del X,Y,Z, subs_idx, equl_idx, indel_idx
-    
-    
+    ### will run two different eval functions: the regular eval, and the per-mixture labeling
+    jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
+    jitted_eval_best_mixture = jax.jit(eval_best_mixture, static_argnames='loss_type')
+
     ### 4.2: evaluate in batches
+    # regular logP across all mixtures
     eval_df_lst = []
+
+    # per mixture labeling
+    eval_mixLabel_df_lst = []
     logP_per_model = []
     for batch_idx,batch in enumerate(eval_dl):
+        ### 4.2.1 setup for both evals
         # batch_idx for eval (use negative value, to have distinctly 
         #   different random keys from training)
         rngkey_for_eval = jax.random.fold_in(rngkey, -batch_idx)
@@ -376,26 +386,44 @@ def fit_predict_pairhmm_mixture(args):
         elif args.have_precalculated_counts:
             allCounts = (batch[0], batch[1], batch[2], batch[3])
         
-        # evaluate logP for each candidate model
-        raw_mat = jitted_eval_fn(all_counts = allCounts, 
-                              t_arr = t_array, 
-                              pairHMM = pairHMM, 
-                              params_dict = best_params, 
-                              hparams_dict = hparams,
-                              eval_rngkey = rngkey_for_eval,
-                              loss_type = args.loss_type,
-                              indices = indices)
-        logP_per_model.append(raw_mat)
-        
-        
-        ### save labeling to dataframes
-        # get the batch sample labels, associated metadata
+        # get the batch sample labels, associated metadata for future dataframes
         eval_sample_idxes = batch[-1]
         label_df_forBatch = training_dset.retrieve_sample_names(eval_sample_idxes)
         
+
+        ### 4.2.1 evaluate regular logP for each candidate model
+        out = jitted_eval_fn(all_counts = allCounts, 
+                                 t_arr = t_array, 
+                                 pairHMM = pairHMM, 
+                                 params_dict = best_params, 
+                                 hparams_dict = hparams,
+                                 eval_rngkey = rngkey_for_eval,
+                                 loss_type = args.loss_type)
+            
+        _, _, logprob_per_sample = out
+        del out
+
+        # get the batch sample labels, associated metadata, and add loss terms
+        logP_across_mixtures_forBatch = copy.deepcopy(label_df_forBatch)
+        logP_across_mixtures_forBatch[eval_col_title] = logprob_per_sample
+        
+        eval_df_lst.append(logP_across_mixtures_forBatch)
+
+
+        ### 4.2.2 label with mixtures
+        raw_mat = jitted_eval_best_mixture(all_counts = allCounts, 
+                                           t_arr = t_array, 
+                                           pairHMM = pairHMM, 
+                                           params_dict = best_params, 
+                                           hparams_dict = hparams,
+                                           eval_rngkey = rngkey_for_eval,
+                                           loss_type = args.loss_type)
+        logP_per_model.append(raw_mat)
+        
         # max logP per sample
+        mixLabeling_forBatch = copy.deepcopy(label_df_forBatch)
         max_per_sample = raw_mat.max(axis=1, keepdims=True)
-        label_df_forBatch['best_logP'] = max_per_sample
+        mixLabeling_forBatch['best_logP'] = max_per_sample
         
         # which mixtures have this logP (accounts for ties)
         maxes_per_row = jnp.repeat(max_per_sample, 
@@ -404,12 +432,16 @@ def fit_predict_pairhmm_mixture(args):
         sample_labels = (raw_mat == maxes_per_row).astype(int)
         mini_df = pd.DataFrame(sample_labels,
                                columns = [f'Mix_{i}' for i in range(indices.shape[0])])
-        label_df_forBatch = label_df_forBatch.join(mini_df)
+        mixLabeling_forBatch = mixLabeling_forBatch.join(mini_df)
         
         # save
-        eval_df_lst.append(label_df_forBatch)
+        eval_mixLabel_df_lst.append(mixLabeling_forBatch)
     
-    ### save the raw logprobabilities
+
+    ##############################################
+    ### 5: SAVE WHAT OVERALL MODEL PRODUCED THIS #
+    ##############################################
+    ### save the raw log probabilities
     os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/MIXTURE_RESULTS')
     
     logP_per_model = jnp.concatenate(logP_per_model, axis=0)
@@ -417,12 +449,10 @@ def fit_predict_pairhmm_mixture(args):
                     f'{args.runname}_logprobs_per_mix.npy')
     with open(logP_outfile, 'wb') as g:
         jnp.save(g, logP_per_model)
-    
-    
-    
-    ##############################################
-    ### 5: SAVE WHAT OVERALL MODEL PRODUCED THIS #
-    ##############################################
+
+    del logP_per_model, logP_outfile, g
+
+
     ### output all possible things needed to load a model later
     OUT_forLoad = {'subst_model_type': args.subst_model_type,
                     'equl_model_type': args.equl_model_type,
@@ -455,7 +485,7 @@ def fit_predict_pairhmm_mixture(args):
         OUT_forLoad = {**OUT_forLoad, **params_toWrite}
         OUT_params = {**OUT_params, **params_toWrite}
 
-    OUT_params['epoch_of_training']= epoch_idx
+    OUT_params['epoch_of_training']= best_epoch
     
     # dump json files
     with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
@@ -466,14 +496,21 @@ def fit_predict_pairhmm_mixture(args):
         json.dump(OUT_params, g, indent="\t", sort_keys=True)
     del OUT_params
     
-    
+    ### save the regular logprobs
+    eval_df = pd.concat(eval_df_lst)
+    with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
+        g.write(f'#Logprobs using model params from epoch{best_epoch}\n')
+        eval_df.to_csv(g, sep='\t')
+
+
     ### save the mixture labeling
     # just refer to model/params.json to figure out the actual model values
     # making a fancy output is taking too much time
-    eval_df = pd.concat(eval_df_lst)
-    eval_df_outfile = (f'{os.getcwd()}/{args.training_wkdir}/MIXTURE_RESULTS/'+
+    eval_mixLabel_df = pd.concat(eval_mixLabel_df_lst)
+    eval_mixLabel_df_outfile = (f'{os.getcwd()}/{args.training_wkdir}/MIXTURE_RESULTS/'+
                        f'{args.runname}_sample_labeling.tsv')
-    eval_df.to_csv(eval_df_outfile, sep='\t')
+    eval_mixLabel_df.to_csv(eval_mixLabel_df_outfile, sep='\t')
+    del eval_mixLabel_df, eval_mixLabel_df_outfile
     
     
     ### output the key to the model checkpoint directory
@@ -488,6 +525,7 @@ def fit_predict_pairhmm_mixture(args):
         g.write(f'# example: indel_idx=0 means mixture uses indel_mix_probs[0], etc. \n\n')
     
         indices_df.to_csv(g, sep='\t')
+    del indices_df, indices_df_outfile
     
 
 
@@ -513,14 +551,15 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    parser.add_argument('--config-file',
-                        type = str,
-                        required=True,
-                        help='Load configs from file in json format.')
+    # parser.add_argument('--config-file',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    args.config_file = 'example_config_fit_predict_multiple_mixtures.json'
     
     
     with open(args.config_file, 'r') as f:
