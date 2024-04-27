@@ -484,8 +484,9 @@ class GGI_mixture(GGI_single):
 ###############################################################################
 ### single TKF91 indel model   ################################################
 ###############################################################################
-# inherit methods for tree flattening/unflattening from no_indel
-class TKF91_single(no_indel):
+# TODO: manually adding +0.003 to mu to ensure numerical stability, but 
+#  there's got to be a better way to do this...
+class TKF91_single(GGI_single):
     def initialize_params(self, argparse_obj):
         """
         ABOUT: return (possibly transformed) parameters
@@ -497,42 +498,39 @@ class TKF91_single(no_indel):
             - lambda (birth rate)
               > DEFAULT: 0.5
               > DOMAIN RESTRICTION: greater than 0
-                  
-            - mu (death rate)
-              > DEFAULT:  0.5
-              > DOMAIN RESTRICTION: greater than 0
-                  
-        hparams to pass on (or infer):
-            - none
+            
+            - offset (mu = lambda + offest + 0.003)
+              > DEFAULT: 0.01
         """
         provided_args = dir(argparse_obj)
         
-        ### PARAMETER: birth rate lambda
         # init
         if 'lam' not in provided_args:
             lam = 0.5
         else:
             lam = argparse_obj.lam
         
+        if 'offset' not in provided_args:
+            offset = 0.0001
+        else:
+            offset = argparse_obj.offset
+        
+        
+        ### PARAMETER: birth rate lambda
         # transform to (-inf, inf) domain; also add extra k_indel dimension
         lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
         
         # create output param dictionary
         initialized_params = {'lam_transf': lam_transf}
         
-        ### PARAMETER: if not tying weights, add death rate, mu, separately
+        
+        ### PARAMETER: offset needed to calculate mu
         if not self.tie_params:
-            # init
-            if 'mu' not in provided_args:
-                mu = 0.5
-            else:
-                mu = argparse_obj.mu
-            
-            # transform to (-inf, inf) domain and add extra k_indel dimension
-            mu_transf = jnp.expand_dims(jnp.sqrt(mu), -1)
+            # also transform domain
+            offset_transf = jnp.expand_dims(jnp.sqrt(offset), -1)
             
             # add to param dict
-            to_add = {'mu_transf': mu_transf}
+            to_add = {'offset_transf': offset_transf}
             initialized_params = {**initialized_params, **to_add}
             del to_add
         
@@ -546,50 +544,57 @@ class TKF91_single(no_indel):
         WHEN IS THIS CALLED: every training loop iteration, every point t
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
-        ### lambda: unpack params, undo domain transf
+        ### Lambda: unpack params, undo domain transf
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
         
-         
+        
+        ### Offset for mu
         if not self.tie_params:
-            ### mu and y are independent params; unpack and undo domain transf
-            mu_transf = params_dict['mu_transf']
-            mu = jnp.square(mu_transf)
+            offset_transf = params_dict['offset_transf']
+            offset = jnp.square(offset_transf)
+            mu = lam + offset + 0.003
         
         else:
-            ### mu takes on value of lambda
-            mu = lam
+            mu = lam + 0.003
+        
         
         ### forms taken from Ian's 2020 paper
         # alpha: ancestral residue survival
+        # (k_indel,)
         alpha = self.calc_alpha(t, mu)
         
         # beta: if one or more descendants exist, probability of more insertions
+        # (k_indel,)
         beta = self.calc_beta(t, lam, mu)
         
         # gamma: probability of inserts if ancestor died
-        gamma = 1 - (mu * beta) / ( lam * (1-alpha) )
+        # instability here whenever gamma becomes negative
+        # (k_indel,)
+        gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
+        
+        ### make matrix
+        # row 1:  M -> (M, I, D); (3, k_indel)
+        # row 2:  I -> (M, I, D); (3, k_indel)
+        mat_af = jnp.expand_dims( (1 - beta) * alpha,           (0, 1))
+        mat_bg = jnp.expand_dims( beta,                         (0, 1))
+        mat_ch = jnp.expand_dims( (1 - beta) * (1 - alpha),     (0, 1))
+        mat_rowOne_rowTwo = jnp.concatenate([mat_af, mat_bg, mat_ch], axis=1)
+        
+        # row 3:  D -> (M, I, D); (3, k_indel)
+        mat_p = jnp.expand_dims( (1 - gamma) * alpha,           (0, 1))
+        mat_q = jnp.expand_dims( gamma,                         (0, 1))
+        mat_r = jnp.expand_dims( (1 - gamma) * (1 - alpha),     (0, 1))
+        mat_rowThree = jnp.concatenate([mat_p, mat_q, mat_r], axis=1)
+    
+        transmat = jnp.concatenate([mat_rowOne_rowTwo, 
+                                    mat_rowOne_rowTwo, 
+                                    mat_rowThree], axis=0)
         
         
-        ### entries in the transition matrix
-        # M -> M, I, D
-        a = (1 - beta) * alpha
-        b = beta
-        c = (1 - beta) * (1 - alpha)
-        
-        # I -> M, I, D
-        f = (1 - beta) * alpha
-        g = beta
-        h = (1 - beta) * (1 - alpha)
-        
-        # D -> M, I, D
-        p = (1 - gamma) * alpha
-        q = gamma
-        r = (1 - gamma) * (1 - alpha)
-        
-        logprob_transition_at_t = jnp.array([[a,b,c],
-                                             [f,g,h],
-                                             [p,q,r]])
+        ### if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
+        logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
     
@@ -601,33 +606,35 @@ class TKF91_single(no_indel):
         WHEN IS THIS CALLED: when writing params to JSON file
         OUTPUTS: parameter dictionary, with transformed params
         """
-        ### lambda: unpack and undo transform
+        ### lambda
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
         
-        out_dict = {}
+    
+        ### offset for mu
         if not self.tie_params:
-            ### mu: unpack and undo transform, if distinct from lambda
-            mu_transf = params_dict['mu_transf']
-            mu = jnp.square(mu_transf)
+            offset_transf = params_dict['offset_transf']
+            offset = jnp.square(offset_transf)
+            mu = lam + offset + 0.003
             
-            # add to output dictionary
-            out_dict['lam'] = lam.item()
-            out_dict['mu'] = mu.item()
+            out_dict = {'lam': lam.item(),
+                        'mu': mu.item()}
         
         else:
-            ### mu = lam = indel_rate
-            out_dict['indel_rate'] = lam.item()
-            
+            indel_rate = lam.item()
+            out_dict = {'indel_rate': lam.item()}
         return out_dict
+    
     
     ################   v__(extra functions placed below)__v   ################
     def calc_alpha(self, t, mu):
         return jnp.exp( -mu * t )
     
-    
     def calc_beta(self, t, lam, mu):
+        # instability here when lam == mu
         num = lam * ( jnp.exp( -lam*t ) - jnp.exp( -mu*t ) )
-        denom = mu * jnp.exp( -lam*t ) - lam * exp( -mu*t )
+        denom = mu * jnp.exp( -lam*t ) - lam * jnp.exp( -mu*t )
+        
         return num/denom
+    
     

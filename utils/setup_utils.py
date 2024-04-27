@@ -67,13 +67,13 @@ def model_import_register(args):
     
     elif args.indel_model_type == 'TKF91_single':
         from model_blocks.indel_models import TKF91_single as indel_model
-        logfile_msg3 = (f'3.) indel model: TKF91_single;'+
+        logfile_msg3 = (f'3.) indel model: TKF91_single;\n'+
                         f'(tie_parms: {args.tie_params})\n')
     
     elif args.indel_model_type == 'GGI_mixture':
         from model_blocks.indel_models import GGI_mixture as indel_model
         logfile_msg3 = (f'3.) indel model: GGI_mixture;'+
-                        f' (tie_parms: {args.tie_params}, num_ixes: {args.k_indel})\n')
+                        f' (tie_parms: {args.tie_params}, num_mixes: {args.k_indel})\n')
         
     else:
         from model_blocks.indel_models import no_indel as indel_model
@@ -101,7 +101,7 @@ def model_import_register(args):
     subst_model_instance = subst_model(args.norm)
     equl_model_instance = equl_model()
     
-    if 'tie_params' in vars(args).keys():
+    if args.indel_model_type in ['GGI_single', 'GGI_mixture', 'TKF91_single']:
         indel_model_instance = indel_model(args.tie_params)
     else:
         indel_model_instance = indel_model()

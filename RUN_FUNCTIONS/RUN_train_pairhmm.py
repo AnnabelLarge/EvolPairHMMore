@@ -49,6 +49,7 @@ from utils.training_testing_fns import train_fn, eval_fn
 
 
 
+
 def train_pairhmm(args):
     #################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
@@ -284,6 +285,7 @@ def train_pairhmm(args):
             
             # add to total loss for this epoch
             epoch_train_sum_logP += batch_train_sum_logP
+            
             del batch_train_sum_logP
         
         
@@ -493,15 +495,14 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    # parser.add_argument('--config-file',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file in json format.')
+    parser.add_argument('--config-file',
+                      type = str,
+                      required=True,
+                      help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
-    args.config_file = 'TEST_train_subsMix.json'
     
     
     with open(args.config_file, 'r') as f:
