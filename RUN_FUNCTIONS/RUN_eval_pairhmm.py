@@ -137,8 +137,8 @@ def eval_pairhmm(args):
     
     
     ### 1.3: quantize time in geometric spacing, just like in cherryML
-    quantization_grid = range(-args.t_grid_num_steps, 
-                              args.t_grid_num_steps + 1, 
+    quantization_grid = range(-(args.t_grid_num_steps-1), 
+                              args.t_grid_num_steps, 
                               1)
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
@@ -238,7 +238,7 @@ def eval_pairhmm(args):
                               eval_rngkey = rngkey_for_eval,
                               loss_type = args.loss_type)
     
-        _, batch_sum_logP, logprob_per_sample = 
+        _, batch_sum_logP, logprob_per_sample = out
         del out
         
         # add to eval_test_loss

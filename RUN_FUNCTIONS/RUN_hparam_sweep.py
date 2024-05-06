@@ -7,9 +7,8 @@ Created on Wed Jan 17 11:18:49 2024
 
 ABOUT:
 ======
-Load aligned pfams, optionally calculate emission and transition 
-  counts from pair alignments. Possibility of single or mixture models
-  over substitutions, equilibrium distributions, and indel models
+same as train_pairhmm, but for a list of JSON configs using the same dataset
+  (dataset retrieved from first file)
 
 
 TODO:
@@ -23,8 +22,8 @@ medium:
 far future:
 -----------
 For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new exchangeability matrix for my specific pfam 
-  dataset? https://github.com/songlab-cal/CherryML
+  CherryML to calculate a new rate matrix for my specific pfam dataset?
+  https://github.com/songlab-cal/CherryML
 
 """
 import os
@@ -48,15 +47,63 @@ from utils.training_testing_fns import train_fn, eval_fn
 
 
 
-
-
-def train_pairhmm(args):
-    #################################################
-    ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
-    #################################################
+def load_all_data(folder_name, first_config_filename):
+    ### ARGPARSE
+    with open(f'./{folder_name}/{first_config_filename}', 'r') as f:
+        t_args = argparse.Namespace()
+        t_args.__dict__.update(json.load(f))
+        args = parser.parse_args(namespace=t_args)
+        
+        
+    ### DECIDE TRAINING MODE
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
     assert args.loadtype == 'eager'
+    
+    # Use this training mode if you already have precalculated count matrices
+    if args.have_precalculated_counts:
+        from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
+        from onlyTrain.hmm_dataset import jax_collator as collator
+        
+    # Use this training mode if you need to calculate emission and transition  
+    #   counts from pair alignments
+    elif not args.have_precalculated_counts:
+        from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
+        from calcCounts_Train.hmm_dataset import jax_collator as collator
+        
+        
+    ### READ WITH PYTORCH DATALOADERS    
+    # training data
+    print(f'Creating DataLoader for training set with {args.train_dset_splits}')
+    training_dset = hmm_reader(data_dir = args.data_dir, 
+                                split_prefixes = args.train_dset_splits,
+                                subsOnly = args.subsOnly)
+    training_dl = DataLoader(training_dset, 
+                              batch_size = args.batch_size, 
+                              shuffle = True,
+                              collate_fn = collator)
+    
+    # test data
+    print(f'Creating DataLoader for test set with {args.test_dset_splits}')
+    test_dset = hmm_reader(data_dir = args.data_dir, 
+                              split_prefixes = args.test_dset_splits,
+                              subsOnly = args.subsOnly)
+    test_dl = DataLoader(test_dset, 
+                          batch_size = args.batch_size, 
+                          shuffle = False,
+                          collate_fn = collator)
+    
+    # wrap output into a tuple
+    out = (training_dset, training_dl, test_dset, test_dl)
+    
+    return out
+
+
+
+def hparam_sweep(args, output_from_loading_func):
+    #################################################
+    ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
+    #################################################
     
     ### 0.1: DECIDE MODEL PARTS TO IMPORT, REGISTER AS PYTREES
     out = model_import_register(args)
@@ -68,17 +115,13 @@ def train_pairhmm(args):
     if args.have_precalculated_counts:
         to_add = ('Reading from precalculated counts matrices before'+
                   ' training\n\n')
-        from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
-        from onlyTrain.hmm_dataset import jax_collator as collator
         
     # Use this training mode if you need to calculate emission and transition  
     #   counts from pair alignments
     elif not args.have_precalculated_counts:
+        from calcCounts_Train.summarize_alignment import summarize_alignment
         to_add = ('Calculating counts matrices from alignments, then'+
                   ' training\n\n')
-        from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
-        from calcCounts_Train.hmm_dataset import jax_collator as collator
-        from calcCounts_Train.summarize_alignment import summarize_alignment
         
         # Later, clip the alignments to one of four possible alignment lengths, 
         #   thus jit-compiling four versions of summarize_alignment
@@ -110,9 +153,9 @@ def train_pairhmm(args):
     # setup folders; manually create model checkpoint directory (i.e. what 
     #   orbax would normally do for you)
     setup_training_dir(args)
-    if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
-        os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
-    os.mkdir(args.model_ckpts_dir)
+    #if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
+    #    os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
+    #os.mkdir(args.model_ckpts_dir)
     
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
@@ -121,33 +164,19 @@ def train_pairhmm(args):
     # can eyeball this faster than a tensorboard thing
     with open(args.logfile_name,'w') as g:
         g.write(logfile_msg)
+        g.write(f'HPARAM SWEEP MODE: not saving model params\n')
         g.write('TRAINING PROG:\n')
     
-    # setup tensorboard writer
-        writer = SummaryWriter(args.tboard_dir)
+    ## setup tensorboard writer
+    #    writer = SummaryWriter(args.tboard_dir)
     
     
     ### 1.2: read data; build pytorch dataloaders 
-    # 1.2.1: training data
-    print(f'Creating DataLoader for training set with {args.train_dset_splits}')
-    training_dset = hmm_reader(data_dir = args.data_dir, 
-                               split_prefixes = args.train_dset_splits,
-                               subsOnly = args.subsOnly)
-    training_dl = DataLoader(training_dset, 
-                             batch_size = args.batch_size, 
-                             shuffle = True,
-                             collate_fn = collator)
-    training_global_max_seqlen = training_dset.max_seqlen()
+    # unpack result from previous loading function
+    training_dset, training_dl, test_dset, test_dl = output_from_loading_func
     
-    # 1.2.2: test data
-    print(f'Creating DataLoader for test set with {args.test_dset_splits}')
-    test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits,
-                              subsOnly = args.subsOnly)
-    test_dl = DataLoader(test_dset, 
-                         batch_size = args.batch_size, 
-                         shuffle = False,
-                         collate_fn = collator)
+    # get global max sequence lengths
+    training_global_max_seqlen = training_dset.max_seqlen()
     test_global_max_seqlen = test_dset.max_seqlen()
     
     
@@ -165,7 +194,6 @@ def train_pairhmm(args):
     
     elif args.loss_type == 'joint':
         eval_col_title = 'logP(A_t,A_0|model)'
-        
     
     
     ###########################
@@ -268,6 +296,7 @@ def train_pairhmm(args):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
+            # DEBUG: turned jit off
             out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
@@ -285,14 +314,13 @@ def train_pairhmm(args):
             
             # add to total loss for this epoch
             epoch_train_sum_logP += batch_train_sum_logP
-            
             del batch_train_sum_logP
         
         
         ### 3.3: GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD
         # aggregate with the equilvalent of -jnp.mean()
         epoch_train_loss = float( -( epoch_train_sum_logP/len(training_dset) ) )
-        writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
+        #writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
         # if the training loss is nan, stop training
         if jnp.isnan(epoch_train_loss):
@@ -309,51 +337,51 @@ def train_pairhmm(args):
             # swap the flag
             record_results = True
             
-            # output all possible things needed to load a model later
-            OUT_forLoad = {'subst_model_type': args.subst_model_type,
-                           'equl_model_type': args.equl_model_type,
-                           'indel_model_type': args.indel_model_type,
-                           'norm': args.norm,
-                           'alphabet_size': args.alphabet_size,
-                           't_grid_center': args.t_grid_center,
-                           't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grid_num_steps,
-                           'subsOnly': args.subsOnly,
-                           'exch_files': args.exch_files,
-                           }
+            ## output all possible things needed to load a model later
+            #OUT_forLoad = {'subst_model_type': args.subst_model_type,
+            #               'equl_model_type': args.equl_model_type,
+            #               'indel_model_type': args.indel_model_type,
+            #               'norm': args.norm,
+            #               'alphabet_size': args.alphabet_size,
+            #               't_grid_center': args.t_grid_center,
+            #               't_grid_step': args.t_grid_step,
+            #               't_grid_num_steps': args.t_grid_num_steps,
+            #               'subsOnly': args.subsOnly,
+            #               'exch_files': args.exch_files
+            #               }
             
-            if 'diffrax_params' in dir(args):
-                OUT_forLoad['diffrax_params'] = args.diffrax_params
+            #if 'diffrax_params' in dir(args):
+            #    OUT_forLoad['diffrax_params'] = args.diffrax_params
             
-            if 'tie_params' in dir(args):
-                OUT_forLoad['tie_params'] = args.tie_params
+            #if 'tie_params' in dir(args):
+            #    OUT_forLoad['tie_params'] = args.tie_params
+                
+            ## add (possibly transformed) parameters
+            #for key, val in params.items():
+            #    if val.shape == (1,):
+            #        OUT_forLoad[key] = val.item()
+            #    else:
+            #        OUT_forLoad[key] = np.array(val).tolist()
             
-            # add (possibly transformed) parameters
-            for key, val in params.items():
-                if val.shape == (1,):
-                    OUT_forLoad[key] = val.item()
-                else:
-                    OUT_forLoad[key] = np.array(val).tolist()
-            
-            # undo any possible parameter transformations and add to 
-            #   1.) the dictionary of all possible things needed to load a 
-            #   model, and 2.) a human-readable JSON of parameters
-            OUT_params = {}
-            for modelClass in pairHMM:
-                params_toWrite = modelClass.undo_param_transform(params)
-                OUT_forLoad = {**OUT_forLoad, **params_toWrite}
-                OUT_params = {**OUT_params, **params_toWrite}
+            ## undo any possible parameter transformations and add to 
+            ##   1.) the dictionary of all possible things needed to load a 
+            ##   model, and 2.) a human-readable JSON of parameters
+            #OUT_params = {}
+            #for modelClass in pairHMM:
+            #    params_toWrite = modelClass.undo_param_transform(params)
+            #    OUT_forLoad = {**OUT_forLoad, **params_toWrite}
+            #    OUT_params = {**OUT_params, **params_toWrite}
 
-            OUT_params['epoch_of_training']= epoch_idx
+            #OUT_params['epoch_of_training']= epoch_idx
             
-            # dump json files
-            with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
-                json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
-            del OUT_forLoad
+            ## dump json files
+            #with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
+            #    json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
+            #del OUT_forLoad
             
-            with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
-                json.dump(OUT_params, g, indent="\t", sort_keys=True)
-            del OUT_params
+            #with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
+            #    json.dump(OUT_params, g, indent="\t", sort_keys=True)
+            #del OUT_params
             
             # record to log file
             with open(args.logfile_name,'a') as g:
@@ -403,27 +431,27 @@ def train_pairhmm(args):
             epoch_test_sum_logP += batch_test_sum_logP
             del batch_test_sum_logP
             
-            # if record_results is triggered (by section 2.4), also record
-            # the log losses per sample
-            if record_results:
-                # get the batch sample labels, associated metadata
-                eval_sample_idxes = batch[-1]
-                meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
-                
-                # add loss terms
-                meta_df_forBatch[eval_col_title] = logprob_per_sample
-                
-                eval_df_lst.append(meta_df_forBatch)
+            ## if record_results is triggered (by section 2.4), also record
+            ## the log losses per sample
+            #if record_results:
+            #    # get the batch sample labels, associated metadata
+            #    eval_sample_idxes = batch[-1]
+            #    meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
+            #    
+            #    # add loss terms
+            #    meta_df_forBatch[eval_col_title] = logprob_per_sample
+            #    
+            #    eval_df_lst.append(meta_df_forBatch)
 
         # get the average epoch_test_loss by aggregating via -jnp.mean(); record
         epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
-        writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
+        #writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
         del epoch_test_sum_logP, batch
 
-        # output the metadata + losses dataframe, along with what epoch 
-        #   you're recording results; place this outside of folders
+        ## output the metadata + losses dataframe, along with what epoch 
+        ##   you're recording results; place this outside of folders
         if record_results:
-            eval_df = pd.concat(eval_df_lst)
+        #    eval_df = pd.concat(eval_df_lst)
             
             ### DEBUG OPTION
             # # make sure this average matches the average from epoch_test_loss
@@ -432,9 +460,9 @@ def train_pairhmm(args):
             # del loss_from_df
             
             
-            with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
-                g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
-                eval_df.to_csv(g, sep='\t')
+            #with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
+            #    g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
+            #    eval_df.to_csv(g, sep='\t')
             
             # also make sure to record "best_test_loss" i.e. the test loss
             #   whenever best training loss is reached
@@ -466,7 +494,7 @@ def train_pairhmm(args):
         
         
     ### when you're done with the function, close the tensorboard writer
-    writer.close()
+    #writer.close()
 
 
     ### if early stopping was never triggered, record results at last epoch
@@ -475,7 +503,6 @@ def train_pairhmm(args):
             g.write(f'\n\nRegular stopping after {epoch_idx} full epochs:\n')
             g.write(f'Final training loss: {epoch_train_loss}\n')
             g.write(f'Final test loss: {epoch_test_loss}\n')
-
     
     
 
@@ -485,34 +512,46 @@ def train_pairhmm(args):
 if __name__ == '__main__':
     import json
     import argparse 
-    import pandas as pd
-    import numpy as np
+    import os
     
     # for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
     assert len(jax.devices()) == 1, err_ms
     del err_ms
     
-    # INITIALIZE PARSER
-    parser = argparse.ArgumentParser(prog='train_pairhmm')
     
+    ### INITIALIZE PARSER
+    parser = argparse.ArgumentParser(prog='hparam_sweep')
     
     # config files required to run
-    parser.add_argument('--config-file',
-                      type = str,
-                      required=True,
-                      help='Load configs from file in json format.')
+    parser.add_argument('--config-folder',
+                        type=str,
+                        required=True,
+                        help='Load configs from this folder, in json format.')
     
-   
     # parse the arguments
-    args = parser.parse_args()
-    # args.config_file = 'cfig_pfams.json'
+    init_args = parser.parse_args()
     
     
-    with open(args.config_file, 'r') as f:
-        t_args = argparse.Namespace()
-        t_args.__dict__.update(json.load(f))
-        args = parser.parse_args(namespace=t_args)
+    ### MAIN PROGRAM
+    # find all the json files in the folder
+    file_lst = [file for file in os.listdir(init_args.config_folder) if file.endswith('.json')]
     
-    # run training function
-    train_pairhmm(args)
+    # read the first config file to load data
+    data_tup = load_all_data(folder_name = init_args.config_folder, 
+                             first_config_filename = file_lst[0])
+    
+    # iterate through all config files with this same data tuple
+    for config_file in file_lst:
+        print(f'STARTING TRAINING FROM: {config_file}')
+        to_open = f'./{init_args.config_folder}/{config_file}'
+        with open(to_open, 'r') as f:
+            t_args = argparse.Namespace()
+            t_args.__dict__.update(json.load(f))
+            this_config_args = parser.parse_args(namespace=t_args)
+        
+        # run training function with this config file
+        hparam_sweep(args = this_config_args, 
+                    output_from_loading_func = data_tup)
+        
+        print()

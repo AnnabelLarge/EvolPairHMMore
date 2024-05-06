@@ -110,8 +110,8 @@ def eval_subsOnly(args):
     
     
     ### 1.3: quantize time in geometric spacing, just like in cherryML
-    quantization_grid = range(-args.t_grid_num_steps, 
-                              args.t_grid_num_steps + 1, 
+    quantization_grid = range(-(args.t_grid_num_steps-1), 
+                              args.t_grid_num_steps, 
                               1)
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     

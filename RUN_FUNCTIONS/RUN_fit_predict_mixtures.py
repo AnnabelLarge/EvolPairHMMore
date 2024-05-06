@@ -133,8 +133,8 @@ def fit_predict_pairhmm_mixture(args):
     
     
     ### 1.3: quantize time in geometric spacing, just like in cherryML
-    quantization_grid = range(-args.t_grid_num_steps, 
-                              args.t_grid_num_steps + 1, 
+    quantization_grid = range(-(args.t_grid_num_steps-1), 
+                              args.t_grid_num_steps, 
                               1)
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
@@ -319,7 +319,7 @@ def fit_predict_pairhmm_mixture(args):
         ###      (this is directly from Ian)
         if (jnp.allclose (prev_train_loss, 
                           jnp.minimum (prev_train_loss, epoch_train_loss), 
-                          rtol=1e-05) ):
+                          rtol=args.early_stop_rtol) ):
             early_stopping_counter += 1
         else:
             early_stopping_counter = 0

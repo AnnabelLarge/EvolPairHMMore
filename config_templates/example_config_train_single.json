@@ -24,7 +24,6 @@
 	"norm": true,
 	"subsOnly": false,
 	"exch_files": "LG08_exchangeability_r.npy",
-	"alphabet_size": 20,
 	"gap_tok": 63,
 
 	"equl_model_type": "equl_base",
