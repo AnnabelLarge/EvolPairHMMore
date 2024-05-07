@@ -236,6 +236,7 @@ def calc_logprob(loss_type):
     if args.equl_model_type in ['equl_base', 'no_equl']:
         equl_model_hparams['equl_vecs_fromData'] = test_dset.retrieve_equil_dist()
         equl_model_hparams['equl_vecs'] = test_dset.retrieve_equil_dist()
+        equl_model_hparams['logP_equl'] = jnp.log(test_dset.retrieve_equil_dist())
     
     
     ### 2.2: initialize the substitution model
@@ -515,12 +516,16 @@ def calc_logprob(loss_type):
     logP_perTime_withConst = (logP_perTime +
                               jnp.expand_dims(marginalization_consts, 1))
     
-    # make sure sum is applied to correct dimension
-    assert jnp.allclose( (logP_perTime_withConst - logP_perTime)[:,0],
-                          marginalization_consts)
+    # make sure sum is applied to correct dimension (axis=0)
+    checksum = []
+    for t_point in range(len(marginalization_consts)):
+        row_to_add = logP_perTime[t_point,:]+ marginalization_consts[t_point]
+        row_to_add = jnp.expand_dims(row_to_add, 0)
+        checksum.append(row_to_add)
+    checksum = jnp.concatenate(checksum, axis=0)
     
-    assert jnp.allclose( (logP_perTime_withConst - logP_perTime)[:,1],
-                          marginalization_consts)
+    assert jnp.allclose( logP_perTime_withConst, checksum )
+    del checksum
 
     
     ### 4.4.3: logsumexp across time dimension (dim0)
@@ -542,4 +547,6 @@ def main():
     print()
     
     
+if __name__ == '__main__':
+    main()
     
