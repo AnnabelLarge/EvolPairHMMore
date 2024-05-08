@@ -354,6 +354,10 @@ def train_batch(args, output_from_loading_func):
             
             if 'tie_params' in dir(args):
                 OUT_forLoad['tie_params'] = args.tie_params
+
+            # for "other indel models" class
+            if 'model_type' in dir(args):
+                OUT_forLoad['model_type'] = args.model_type
                 
             # add (possibly transformed) parameters
             for key, val in params.items():

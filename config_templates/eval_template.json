@@ -2,7 +2,7 @@
 	"eval_wkdir": "EVAL-RES_findYourMatch",
 	"eval_runname": "REPLACE",
 
-	"training_wkdir": "OLD_PARAMS",
+	"training_wkdir": "PARAMS_train_split_only",
 	"training_runname": "REPLACE",
 	"rng_seednum": 0,
 
@@ -10,7 +10,7 @@
 
 	"have_precalculated_counts": true,
 	"loadtype": "eager",
-	"data_dir": "DATA_FAM-FOCUS_hmm",
+	"data_dir": "DATA_split2AllPossible",
 	"test_dset_splits": "REPLACE",
 	"batch_size": 50000,
 	"gap_tok": 63,

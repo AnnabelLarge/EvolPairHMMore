@@ -15,10 +15,12 @@ Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 2. GGI_mixture
 
 3. TKF91_single
-   > NOTE: implemented by using GGI machinery because it's easy to copy/paste 
-          code, but exact solutions to DiffEqs exist for this model
 
-4. no_indel
+4. TKF92_single
+
+5. otherIndel_single (this is for LG05, RS07, and KM03)
+
+6. no_indel
    > placeholder so that training script will run, but P(transitions)=0 for 
      all transitions that are not M->M
 
@@ -45,6 +47,18 @@ universal order of dimensions:
 2. k_subst
 3. k_equl
 4. k_indel
+
+
+TODO:
+=====
+  - is there a smarter way to combine all indel models into one flexible (but
+    still jit-compatible) class? Things to contend with include:
+      > TKF models are fitting an offset, but all others are fitting mu 
+        directly; TKF also has alpha_beta function
+      > GGI function technically has a different signature, but could be 
+        wrapped up
+      > TKF91 doesn't have extension probabilities, but I could just provide 
+        placeholder values
 """
 import numpy as np
 import copy
@@ -52,8 +66,13 @@ import jax
 from jax import numpy as jnp
 from jax.nn import softmax
 
-### if training/evaluating GGI or TKF91 model, use the functions from Ian
-from model_blocks.GGI_funcs import transitionMatrix
+### import transition functions from Ian
+from model_blocks.GGI_funcs import transitionMatrix as GGI_Ftransitions
+from model_blocks.other_transition_funcs import TKF91_Ftransitions
+from model_blocks.other_transition_funcs import TKF92_Ftransitions
+from model_blocks.other_transition_funcs import LG05_Ftransitions
+from model_blocks.other_transition_funcs import RS07_Ftransitions
+from model_blocks.other_transition_funcs import KM03_Ftransitions
 
 # We replace zeroes and infinities with small numbers sometimes
 # It's sinful but BOY DO I LOVE SIN
@@ -241,7 +260,7 @@ class GGI_single:
         
         # transition matrix ((a,b,c),(f,g,h),(p,q,r)); rows sum to 1
         # (3, 3, k_indel); in this case, k_indel=1
-        transmat = transitionMatrix (t, 
+        transmat = GGI_Ftransitions (t, 
                                      indel_params, 
                                      alphabet_size,
                                      **diffrax_params)
@@ -353,7 +372,6 @@ class GGI_mixture(GGI_single):
         hparams to pass on (or infer):
             - diffrax params (from argparse)
         """
-        ### will use the transitionMatrix function from Ian
         provided_args = dir(argparse_obj)
         
         ### PARAMETERS: ggi params
@@ -482,10 +500,10 @@ class GGI_mixture(GGI_single):
 
 
 ###############################################################################
-### single TKF91 indel model   ################################################
+### TKF91_single   ############################################################
 ###############################################################################
-# TODO: manually adding +0.003 to mu to ensure numerical stability, but 
-#  there's got to be a better way to do this...
+# inherits the following from single_GGI: __init__, pytree 
+#   transformation functions
 class TKF91_single(GGI_single):
     def initialize_params(self, argparse_obj):
         """
@@ -499,12 +517,13 @@ class TKF91_single(GGI_single):
               > DEFAULT: 0.5
               > DOMAIN RESTRICTION: greater than 0
             
-            - offset (mu = lambda + offest + 0.003)
+            - offset (mu = lambda + offest + TKF_STABILITY_ADDITION)
+              > TKF_STABILITY_ADDITION is 1e-3, until something fails...
               > DEFAULT: 0.01
         """
         provided_args = dir(argparse_obj)
         
-        # init
+        # initialize with default values, if needed
         if 'lam' not in provided_args:
             lam = 0.5
         else:
@@ -544,6 +563,10 @@ class TKF91_single(GGI_single):
         WHEN IS THIS CALLED: every training loop iteration, every point t
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
+        # make sure TKF mu >= lambda
+        #   it's kind of a bad hack...not sure what else to try though
+        TKF_STABILITY_ADDITION = 1e-3
+
         ### Lambda: unpack params, undo domain transf
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
@@ -553,44 +576,14 @@ class TKF91_single(GGI_single):
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
             offset = jnp.square(offset_transf)
-            mu = lam + offset + 0.003
+            mu = lam + offset + TKF_STABILITY_ADDITION
         
         else:
-            mu = lam + 0.003
+            mu = lam + TKF_STABILITY_ADDITION
         
-        
-        ### forms taken from Ian's 2020 paper
-        # alpha: ancestral residue survival
-        # (k_indel,)
-        alpha = self.calc_alpha(t, mu)
-        
-        # beta: if one or more descendants exist, probability of more insertions
-        # (k_indel,)
-        beta = self.calc_beta(t, lam, mu)
-        
-        # gamma: probability of inserts if ancestor died
-        # instability here whenever gamma becomes negative
-        # (k_indel,)
-        gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
-        
-        ### make matrix
-        # row 1:  M -> (M, I, D); (3, k_indel)
-        # row 2:  I -> (M, I, D); (3, k_indel)
-        mat_af = jnp.expand_dims( (1 - beta) * alpha,           (0, 1))
-        mat_bg = jnp.expand_dims( beta,                         (0, 1))
-        mat_ch = jnp.expand_dims( (1 - beta) * (1 - alpha),     (0, 1))
-        mat_rowOne_rowTwo = jnp.concatenate([mat_af, mat_bg, mat_ch], axis=1)
-        
-        # row 3:  D -> (M, I, D); (3, k_indel)
-        mat_p = jnp.expand_dims( (1 - gamma) * alpha,           (0, 1))
-        mat_q = jnp.expand_dims( gamma,                         (0, 1))
-        mat_r = jnp.expand_dims( (1 - gamma) * (1 - alpha),     (0, 1))
-        mat_rowThree = jnp.concatenate([mat_p, mat_q, mat_r], axis=1)
-    
-        transmat = jnp.concatenate([mat_rowOne_rowTwo, 
-                                    mat_rowOne_rowTwo, 
-                                    mat_rowThree], axis=0)
-        
+        ### calculate transition probabilities
+        alpha, beta = self.TKF_alpha_beta(lam, mu, t)
+        transmat = TKF91_Ftransitions (alpha, beta, lam, mu, t)
         
         ### if any position in transmat is zero, replace with 1 such that log(1)=0
         transmat = jnp.where(transmat != 0, transmat, 1)
@@ -627,14 +620,408 @@ class TKF91_single(GGI_single):
     
     
     ################   v__(extra functions placed below)__v   ################
-    def calc_alpha(self, t, mu):
-        return jnp.exp( -mu * t )
-    
-    def calc_beta(self, t, lam, mu):
-        # instability here when lam == mu
-        num = lam * ( jnp.exp( -lam*t ) - jnp.exp( -mu*t ) )
-        denom = mu * jnp.exp( -lam*t ) - lam * jnp.exp( -mu*t )
+    def TKF_alpha_beta (self, lam, mu, t):
+        alpha = jnp.exp(-mu*t)
         
-        return num/denom
+        beta_num = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t)))
+        beta_denom = (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+        beta = beta_num / beta_denom
+        
+        return alpha, beta
+    
+
+
+
+###############################################################################
+### TKF92_single   ############################################################
+###############################################################################
+# inherits the following from TKF91_single: __init__, TKF_alpha_beta, pytree 
+#   transformation functions
+class TKF92_single(TKF91_single):
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit:
+            - lambda (birth rate)
+              > DEFAULT: 0.5
+              > DOMAIN RESTRICTION: greater than 0
+            
+            - offset (mu = lambda + offest + TKF_STABILITY_ADDITION)
+              > TKF_STABILITY_ADDITION is 1e-3, until something fails...
+              > DEFAULT: 0.01
+            
+            - x (extension probability)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: (0, 1)
+                  
+            - y (retraction probability)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: (0, 1)
+        """
+        provided_args = dir(argparse_obj)
+        
+        ### initialize with default values, if needed
+        # lambda
+        if 'lam' not in provided_args:
+            lam = 0.5
+        else:
+            lam = argparse_obj.lam
+        
+        # mu
+        if 'offset' not in provided_args:
+            offset = 0.0001
+        else:
+            offset = argparse_obj.offset
+        
+        # x
+        if 'x' not in provided_args:
+            x = 0.5
+        else:
+            x = argparse_obj.x
+        
+        # y
+        if 'y' not in provided_args:
+            y = 0.5
+        else:
+            y = argparse_obj.y
+        
+        
+        ### keep lambda and x
+        # transform to (-inf, inf) domain; also add extra k_indel dimension
+        lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
+        x_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(x)), -1)
+        
+        # create output param dictionary
+        initialized_params = {'lam_transf': lam_transf,
+                              'x_transf': x_transf}
+        
+        
+        ### if not tying weights, add offset and y separately
+        if not self.tie_params:
+            # also transform domain
+            offset_transf = jnp.expand_dims(jnp.sqrt(offset), -1)
+            y_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(y)), -1)
+            
+            # add to param dict
+            to_add = {'offset_transf': offset_transf,
+                      'y_transf': y_transf}
+            initialized_params = {**initialized_params, **to_add}
+            del to_add
+        
+        return initialized_params, dict()
+        
+        
+    def logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: calculate the transition matrix at time t
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration, every point t
+        OUTPUTS: logP(transitions); the GGI transition matrix
+        """
+        # make sure TKF mu >= lambda
+        #   it's kind of a bad hack...not sure what else to try though
+        TKF_STABILITY_ADDITION = 1e-3
+
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
+        lam_transf = params_dict['lam_transf']
+        x_transf = params_dict['x_transf']
+        
+        # undo domain transformation
+        lam = jnp.square(lam_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        
+        
+        if not self.tie_params:
+            ### mu and y are independent
+            # unpack params
+            offset_transf = params_dict['offset_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformations; calculate mu
+            offset = jnp.square(offset_transf)
+            mu = lam + offset + TKF_STABILITY_ADDITION
+            y = jnp.exp(-jnp.square(y_transf))
+            
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            mu = lam + TKF_STABILITY_ADDITION
+            y = x
+        
+        ### calculate transition probabilities
+        alpha, beta = self.TKF_alpha_beta(lam, mu, t)
+        transmat = TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t)
+        
+        ### if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
+        logprob_transition_at_t = jnp.log(transmat)
+        
+        return logprob_transition_at_t
     
     
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
+        lam_transf = params_dict['lam_transf']
+        x_transf = params_dict['x_transf']
+        
+        # undo domain transformation
+        lam = jnp.square(lam_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        
+        out_dict = {}
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            offset_transf = params_dict['offset_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            offset = jnp.square(offset_transf)
+            mu = lam + offset + 0.003
+            y = jnp.exp(-jnp.square(y_transf))
+            
+            # also turn them into regular integers, for writing JSON
+            lam = lam.item()
+            mu = mu.item()
+            x = x.item()
+            y = y.item()
+            
+            # add to output dictionary
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['x'] = x
+            out_dict['y'] = y
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            # combine lambda and mu under label "indel rate"
+            # combine x and y under label "extension prob"
+            indel_rate = lam.item()
+            extension_prob = x.item()
+            
+            # add to output dictionary
+            out_dict['indel_rate'] = indel_rate
+            out_dict['extension_prob'] = extension_prob
+        
+        return out_dict
+
+
+
+###############################################################################
+### LG05, RS07, KM03   ########################################################
+###############################################################################
+# this could be the template to combining all indel models into one class
+class otherIndel_single:
+    def __init__(self, tie_params, model_name):
+        self.tie_params = tie_params
+        self.model_name = model_name
+        
+        if model_name == 'LG05':
+            self.transition_function = LG05_Ftransitions
+            
+        elif model_name == 'RS07':
+            self.transition_function = RS07_Ftransitions
+        
+        elif model_name == 'KM03':
+            self.transition_function = KM03_Ftransitions
+    
+    
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: return (possibly transformed) parameters
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit:
+            - lambda (insertion rates)
+              > DEFAULT: 0.5
+              > DOMAIN RESTRICTION: greater than 0
+                  
+            - mu (deletion rates)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: greater than 0
+                  
+            - x (extension probability)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: (0, 1)
+                  
+            - y (retraction probability)
+              > DEFAULT:  0.5
+              > DOMAIN RESTRICTION: (0, 1)
+            
+        hparams to pass on (or infer):
+            - None
+        """
+        provided_args = dir(argparse_obj)
+        
+        ### PARAMETERS: ggi params
+        # lambda
+        if 'lam' not in provided_args:
+            lam = 0.5
+        else:
+            lam = argparse_obj.lam
+        
+        # mu
+        if 'mu' not in provided_args:
+            mu = 0.5
+        else:
+            mu = argparse_obj.mu
+            
+        # x
+        if 'x' not in provided_args:
+            x = 0.5
+        else:
+            x = argparse_obj.x
+        
+        # y
+        if 'y' not in provided_args:
+            y = 0.5
+        else:
+            y = argparse_obj.y
+        
+        ### keep lambda and x
+        # transform to (-inf, inf) domain; also add extra k_indel dimension
+        lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
+        x_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(x)), -1)
+        
+        # create output param dictionary
+        initialized_params = {'lam_transf': lam_transf,
+                              'x_transf': x_transf}
+        
+        
+        ### if not tying weights, add mu and y separately
+        if not self.tie_params:
+            # also transform domain
+            mu_transf = jnp.expand_dims(jnp.sqrt(mu), -1)
+            y_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(y)), -1)
+            
+            # add to param dict
+            to_add = {'mu_transf': mu_transf,
+                      'y_transf': y_transf}
+            initialized_params = {**initialized_params, **to_add}
+            del to_add
+        
+        
+        return initialized_params, dict()
+    
+    
+    def logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: calculate the transition matrix at time t
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop iteration, every point t
+        OUTPUTS: logP(transitions); the GGI transition matrix
+        """
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
+        lam_transf = params_dict['lam_transf']
+        x_transf = params_dict['x_transf']
+        
+        # undo domain transformation
+        lam = jnp.square(lam_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        
+
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            mu_transf = params_dict['mu_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            mu = jnp.square(mu_transf)
+            y = jnp.exp(-jnp.square(y_transf))
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            mu = lam
+            y = x
+        
+        
+        ### find transition matrix
+        transmat = self.transition_function(lam, mu, x, y, t)
+        
+        # if any position in transmat is zero, replace with 1 such that log(1)=0
+        transmat = jnp.where(transmat != 0, transmat, 1)
+        logprob_transition_at_t = jnp.log(transmat)
+        
+        return logprob_transition_at_t
+    
+    
+    def undo_param_transform(self, params_dict):
+        """
+        ABOUT: if any parameters have domain changes, undo those
+        JITTED: no
+        WHEN IS THIS CALLED: when writing params to JSON file
+        OUTPUTS: parameter dictionary, with transformed params
+        """
+        ### lambda and x are guaranteed to be there
+        # unpack parameters
+        lam_transf = params_dict['lam_transf']
+        x_transf = params_dict['x_transf']
+        
+        # undo domain transformation
+        lam = jnp.square(lam_transf)
+        x = jnp.exp(-jnp.square(x_transf))
+        
+        out_dict = {}
+        if not self.tie_params:
+            ### mu and y are independent params
+            # unpack params
+            mu_transf = params_dict['mu_transf']
+            y_transf = params_dict['y_transf']
+            
+            # undo domain transformation
+            mu = jnp.square(mu_transf)
+            y = jnp.exp(-jnp.square(y_transf))
+            
+            # also turn them into regular integers, for writing JSON
+            lam = lam.item()
+            mu = mu.item()
+            x = x.item()
+            y = y.item()
+            
+            # add to output dictionary
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['x'] = x
+            out_dict['y'] = y
+        
+        else:
+            ### mu takes on value of lambda, y takes on value of x
+            # combine lambda and mu under label "indel rate"
+            # combine x and y under label "extension prob"
+            indel_rate = lam.item()
+            extension_prob = x.item()
+            
+            # add to output dictionary
+            out_dict['indel_rate'] = indel_rate
+            out_dict['extension_prob'] = extension_prob
+        
+        return out_dict
+    
+    ###  v__(these allow the class to be passed into a jitted function)__v  ###
+    def _tree_flatten(self):
+        children = ()
+        aux_data = {'tie_params': self.tie_params,
+                    'model_name': self.model_name} 
+        return (children, aux_data)
+    
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        return cls(*children, **aux_data)
+
+

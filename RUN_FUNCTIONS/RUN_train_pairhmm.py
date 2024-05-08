@@ -322,11 +322,18 @@ def train_pairhmm(args):
                            'exch_files': args.exch_files,
                            }
             
+            # for any GGI model
             if 'diffrax_params' in dir(args):
                 OUT_forLoad['diffrax_params'] = args.diffrax_params
             
+            # for all indel models except "no_indel"
             if 'tie_params' in dir(args):
                 OUT_forLoad['tie_params'] = args.tie_params
+
+            # for "other indel models" class
+            if 'model_type' in dir(args):
+                OUT_forLoad['model_type'] = args.model_type
+
             
             # add (possibly transformed) parameters
             for key, val in params.items():
