@@ -28,10 +28,6 @@ import jax.numpy as jnp
 # J. Mol. Evol.  33: 114–124.
 def TKF91_Ftransitions (alpha, beta, lam, mu, t):
   # alpha, beta = TKF_alpha_beta (lam, mu, t)
-
-  ### this approximation from Ian behaves weirdly for small sample sizes
-  # gamma = lam / mu
-
   gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
 
   
@@ -48,10 +44,6 @@ def TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t):
   domain problem if mu <= lam
   """
   r = (x + y) / 2
-
-  ### this approximation from Ian behaves weirdly for small sample sizes
-  # gamma = lam / mu
-
   gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
   
   return jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
@@ -66,13 +58,13 @@ def LG05_Ftransitions (lam, mu, x, y, t):
   """
   domain problem if x=y=1, but that's really unlikely
   """
-  epsilon = (x + y) / 2
+  epsilon = (x + y)/2
   gamma = epsilon
   maxDelta = .49999
-  # delta = jnp.minimum (maxDelta, 1 - jnp.exp(-(lam + mu)*t/(2*(1-gamma))))
+  # delta = jnp.minimum ( maxDelta, 1 - jnp.exp( -(lam + mu)*t/(1-gamma) ) )
   
   # epsilon cannot be zero, or this denom is undefined
-  exponentiated =  -(lam + mu)*t/(2*(1-gamma))
+  exponentiated =  -(lam + mu)*t/(1-gamma)
   delta = jnp.minimum (maxDelta, 
                        1 - jnp.exp(exponentiated) 
                        )
@@ -89,12 +81,12 @@ def RS07_Ftransitions (lam, mu, x, y, t):
   """
   domain problem if x=y=1, but that's really unlikely
   """
-  epsilon = (x + y) / 2
+  epsilon = (x + y)/2
   maxDelta = .49999
-  # delta = jnp.minimum (maxDelta, 1 / (1 + 1 / (1 - jnp.exp(-(lam + mu)*t/(2*(1-epsilon))))))
+  # delta = jnp.minimum (maxDelta, 1 / (1 + 1 / (1 - jnp.exp(-(lam + mu)*t/(1-epsilon)))))
   
   # epsilon cannot be zero, or this denom is undefined
-  exponentiated = -(lam + mu)*t/(2*(1-epsilon))
+  exponentiated = -(lam + mu)*t/(1-epsilon)
   delta = jnp.minimum (maxDelta, 
                        1 / (1 + 1 / (1 - jnp.exp( exponentiated )))
                        )
