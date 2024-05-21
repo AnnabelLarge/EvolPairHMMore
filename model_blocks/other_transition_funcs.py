@@ -43,6 +43,7 @@ def TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t):
   """
   domain problem if mu <= lam
   """
+  # alpha, beta = TKF_alpha_beta (lam, mu, t)
   r = (x + y) / 2
   gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
   
