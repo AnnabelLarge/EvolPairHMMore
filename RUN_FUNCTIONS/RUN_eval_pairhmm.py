@@ -11,22 +11,6 @@ Load aligned pfams (and optionally calculate emission and transition
   counts from pair alignment inputs), load GGI indel parameters, and 
   eval only
 
-
-TODO:
-=====
-medium:
--------
-- remove the option to calculate counts on the fly, and just make this a 
-  separate pre-processing script (I don't ever use it...)
-
-
-far future:
------------
-For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new rate matrix for my specific pfam dataset?
-  https://github.com/songlab-cal/CherryML
-
-
 """
 import os
 import pickle
@@ -264,12 +248,6 @@ def eval_pairhmm(args):
     # also get averge loss by aggregating with -jnp.mean()
     epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
     del eval_sum_logP
-
-    ### DEBUG OPTION
-    # # make sure this average matches the average from epoch_test_loss
-    #     loss_from_df = -eval_df[eval_col_title].mean()
-    #     assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
-    #     del loss_from_df
     
     # output to files
     with open(output_persamp_file,'w') as g:

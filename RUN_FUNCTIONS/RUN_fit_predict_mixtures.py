@@ -311,6 +311,10 @@ def fit_predict_pairhmm_mixture(args):
             best_params = params
             best_epoch = epoch_idx
             best_train_loss = epoch_train_loss
+            
+            # record to log file
+            with open(args.logfile_name,'a') as g:
+                g.write(f'New best training loss at epoch {epoch_idx}: {epoch_train_loss}\n')
 
             
             
@@ -567,7 +571,7 @@ if __name__ == '__main__':
    
     # parse the arguments
     args = parser.parse_args()
-    args.config_file = 'example_config_fit_predict_multiple_mixtures.json'
+    args.config_file = 'example_config_train_multiple_mixtures.json'
     
     
     with open(args.config_file, 'r') as f:

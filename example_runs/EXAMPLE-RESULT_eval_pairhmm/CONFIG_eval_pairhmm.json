@@ -1,0 +1,17 @@
+{
+	"eval_wkdir": "EXAMPLE-RESULT_eval_pairhmm",
+	"eval_runname": "example_eval_single",
+
+	"training_wkdir": "EXAMPLE-RESULT_train_pairhmm",
+	"training_runname": "example_train_single",
+	"rng_seednum": 0,
+
+	"have_precalculated_counts": false,
+	"loadtype": "eager",
+	"data_dir": "DEV-DATA_pair_alignments",
+	"test_dset_splits": ["FiveSamp"],
+	"batch_size": 5,
+
+	"loss_type": "conditional"
+
+}

@@ -6,7 +6,7 @@
 	"alphabet_size": 20,
 	"have_precalculated_counts": false,
 	"loadtype": "eager",
-	"data_dir": "DEV-DATA_pair_alignments",
+	"data_dir": "example_runs/DEV-DATA_pair_alignments",
 	"train_dset_splits": ["FiveSamp"],
 	"test_dset_splits": ["FiveSamp"],
 	"batch_size": 2,
@@ -25,6 +25,7 @@
 	"exch_files": "LG08_exchangeability_r.npy",
 	"alphabet_size": 20,
 	"gap_tok": 63,
+	"loss_type": "conditional",
 
 	"equl_model_type": "equl_base",
 

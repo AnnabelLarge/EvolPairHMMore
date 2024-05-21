@@ -25,22 +25,6 @@ def main():
     assert observed_equl.sum() == 1
     
     
-    
-    ### no_equl
-    params = {}
-    hparams = {'equl_vecs_fromData': observed_equl}
-    model = no_equl()
-    equl_out, placeholder_vec = model.equlVec_logprobs(params, hparams)
-    
-    # did this function return the observed equlibrium distribution?
-    assert jnp.allclose(equl_out[:,0], observed_equl)
-    
-    # is the placeholder vec correctly a zero vector?
-    assert (placeholder_vec == 0).sum().item() == placeholder_vec.shape[0]
-    
-    del params, hparams, model, equl_out, placeholder_vec
-    
-    
     ### equl_base
     params = {}
     hparams = {'equl_vecs_fromData': observed_equl}

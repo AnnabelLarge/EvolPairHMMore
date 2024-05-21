@@ -1,4 +1,6 @@
-output on 4/16/24:
+unit tests run locally on macOS (CPU-only jax/pytorch installs)
+
+output on 5/21/24:
 ==================
 TESTING counting in summarize_alignment
 [PASSED] correct counts of alignment events
@@ -17,5 +19,12 @@ TESTING batched GGI code from indel_models
 
 TESTING likelihood calculation in utils.training_testing_fns
 Creating DataLoader for test set with ['FiveSamp']
+[SUB TEST PASSED] conditional logprob as expected
+
+Creating DataLoader for test set with ['FiveSamp']
+[SUB TEST PASSED] joint logprob as expected
+
 [PASSED] correct likelihood calculation for all single models
+Creating DataLoader for test set with ['FiveSamp']
+[PASSED] correct likelihood calculation for only scoring substitution sites
 [PASSED] correct recipe for adding mixture weights and logsumexp-ing

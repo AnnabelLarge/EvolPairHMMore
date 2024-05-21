@@ -11,21 +11,6 @@ Load aligned pfams, optionally calculate emission and transition
   counts from pair alignments. Possibility of single or mixture models
   over substitutions, equilibrium distributions, and indel models
 
-
-TODO:
-=====
-medium:
--------
-- remove the option to calculate counts on the fly, and just make this a 
-  separate pre-processing script (I don't ever use it...)
-
-
-far future:
------------
-For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new exchangeability matrix for my specific pfam 
-  dataset? https://github.com/songlab-cal/CherryML
-
 """
 import os
 import pickle
@@ -432,13 +417,6 @@ def train_pairhmm(args):
         if record_results:
             eval_df = pd.concat(eval_df_lst)
             
-            ### DEBUG OPTION
-            # # make sure this average matches the average from epoch_test_loss
-            # loss_from_df = -eval_df[eval_col_title].mean()
-            # assert jnp.allclose(loss_from_df, epoch_test_loss, rtol=1e-3)
-            # del loss_from_df
-            
-            
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
                 eval_df.to_csv(g, sep='\t')
@@ -513,7 +491,6 @@ if __name__ == '__main__':
    
     # parse the arguments
     args = parser.parse_args()
-    # args.config_file = 'cfig_pfams.json'
     
     
     with open(args.config_file, 'r') as f:

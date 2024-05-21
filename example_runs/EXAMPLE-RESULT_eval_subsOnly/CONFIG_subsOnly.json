@@ -1,0 +1,27 @@
+{
+	"training_wkdir": "EXAMPLE-RESULT_eval_subsOnly",
+	"runname": "example_run",
+
+	"alphabet_size": 20,
+	"have_precalculated_counts": false,
+	"loadtype": "eager",
+	"data_dir": "DEV-DATA_pair_alignments",
+	"test_dset_splits": ["FiveSamp"],
+	"batch_size": 5,
+	"loss_type": "conditional",
+
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 20,
+
+	"subst_model_type": "subst_base",
+	"subsOnly": true,
+	"norm": true,
+	"exch_files": "LG08_exchangeability_r.npy",
+	"alphabet_size": 20,
+	"gap_tok": 63,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": null
+}

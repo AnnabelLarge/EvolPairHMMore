@@ -22,9 +22,6 @@ Methods to generate equilibrium distributions:
 
 at a minimum, future classes need:
 ==================================
-all can all inherit "no_equl" to get necessary methods that allow the class
-    to be passed into a jitted function
-    
 1. initialize_params(self, argparse_obj): initialize all parameters and 
      hyperparameters; parameters are updated with optax, but hyperparameters
      just help the functions run (i.e. aren't updated)
@@ -36,7 +33,6 @@ all can all inherit "no_equl" to get necessary methods that allow the class
 3. undo_param_transform(self, params_dict): undo any domain transformations
      and output regular list/ints; mainly used for recording results to
      tensorboard, JSON, or anything else that doesn't like jax arrays
-     > if NO transforms are needed, this can be inherited as-is from "no_equl"
        
 
 universal order of dimensions:

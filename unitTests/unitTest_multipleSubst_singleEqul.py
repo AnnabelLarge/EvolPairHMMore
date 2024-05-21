@@ -190,10 +190,10 @@ def main():
     ############################
     ### 3.) test my function   #
     ############################
-    from model_blocks.protein_subst_models import subs_mixture
+    from model_blocks.protein_subst_models import subst_mixture
     
     ### initialize class object, dictionaries
-    my_model = subs_mixture(norm)
+    my_model = subst_mixture(norm)
     
     
     ### make rate matrix R

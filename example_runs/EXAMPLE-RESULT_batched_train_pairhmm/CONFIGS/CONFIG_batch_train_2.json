@@ -1,6 +1,6 @@
 {
-	"training_wkdir": "RESULT",
-	"runname": "RUNNAME",
+	"training_wkdir": "EXAMPLE-RESULT_batched_train_pairhmm",
+	"runname": "example_run2",
 	"rng_seednum": 0,
 
 	"alphabet_size": 20,
@@ -11,14 +11,15 @@
 	"test_dset_splits": ["FiveSamp"],
 	"batch_size": 5,
 
-	"num_epochs": 250,
+	"num_epochs": 100,
 	"learning_rate": 0.01,
-	"patience": 250,
-	"loss_type": "joint",
+	"patience": 100,
+	"loss_type": "conditional",
+	"early_stop_rtol":1e-5,
 
-	"t_grid_center": 0.1,
+	"t_grid_center": 0.03,
 	"t_grid_step": 1.1,
-	"t_grid_num_steps": 20,
+	"t_grid_num_steps": 60,
 
 	"subst_model_type": "subst_base",
 	"norm": true,

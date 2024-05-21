@@ -1,0 +1,11 @@
+# indices in this table correspond to 0-based indexing of each model's param array
+# subs_idx = index for the parameter arrays associated with substitution mixtures
+# equl_idx = index for the parameter arrays associated with equlibrium mixtures
+# indel_idx = index for the parameter arrays associated with indel model mixtures
+# example: indel_idx=0 means mixture uses indel_mix_probs[0], etc. 
+
+	subs_idx	equl_idx	indel_idx
+Mix_0	0	0	0
+Mix_1	0	0	1
+Mix_2	1	0	0
+Mix_3	1	0	1

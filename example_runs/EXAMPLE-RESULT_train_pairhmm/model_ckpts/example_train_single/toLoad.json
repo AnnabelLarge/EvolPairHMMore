@@ -1,0 +1,26 @@
+{
+	"alphabet_size": 20,
+	"diffrax_params": {
+		"atol": 1e-06,
+		"rtol": 0.001,
+		"step": null
+	},
+	"equl_model_type": "equl_base",
+	"exch_files": "LG08_exchangeability_r.npy",
+	"indel_model_type": "GGI_single",
+	"lam": 0.14555807411670685,
+	"lam_transf": 0.38152074813842773,
+	"mu": 0.13563935458660126,
+	"mu_transf": 0.3682924807071686,
+	"norm": true,
+	"subsOnly": false,
+	"subst_model_type": "subst_base",
+	"t_grid_center": 0.1,
+	"t_grid_num_steps": 20,
+	"t_grid_step": 1.1,
+	"tie_params": false,
+	"x": 0.3111707270145416,
+	"x_transf": 1.0804691314697266,
+	"y": 0.2229994684457779,
+	"y_transf": 1.224984049797058
+}

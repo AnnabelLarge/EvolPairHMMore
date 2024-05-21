@@ -57,7 +57,6 @@ print('TESTING counting in summarize_alignment')
 
 counts_test()
 print('[PASSED] correct counts of alignment events')
-
 print()
 
 
@@ -117,7 +116,7 @@ print()
 ### testing likelihood calculation in utils.training_testing_fns #
 ##################################################################
 from unitTests.unitTest_calcLoglike_singleModels import main as trainingFn_test1
-from unitTests.unitTest_subst_only_model import main as trainingFN_test2
+from unitTests.unitTest_subst_only_model import main as trainingFn_test2
 from unitTests.unitTest_logSum_mixWeights import main as trainingFn_test3
 print('TESTING likelihood calculation in utils.training_testing_fns')
 

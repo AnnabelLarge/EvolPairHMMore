@@ -8,22 +8,7 @@ Created on Wed Jan 17 11:18:49 2024
 ABOUT:
 ======
 same as train_pairhmm, but for a list of JSON configs using the same dataset
-  (dataset retrieved from first file)
-
-
-TODO:
-=====
-medium:
--------
-- remove the option to calculate counts on the fly, and just make this a 
-  separate pre-processing script (I don't ever use it...)
-
-
-far future:
------------
-For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new rate matrix for my specific pfam dataset?
-  https://github.com/songlab-cal/CherryML
+  (dataset retrieved from first file); also does not record model params
 
 """
 import os
@@ -153,9 +138,6 @@ def hparam_sweep(args, output_from_loading_func):
     # setup folders; manually create model checkpoint directory (i.e. what 
     #   orbax would normally do for you)
     setup_training_dir(args)
-    #if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
-    #    os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
-    #os.mkdir(args.model_ckpts_dir)
     
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
@@ -166,9 +148,6 @@ def hparam_sweep(args, output_from_loading_func):
         g.write(logfile_msg)
         g.write(f'HPARAM SWEEP MODE: not saving model params\n')
         g.write('TRAINING PROG:\n')
-    
-    ## setup tensorboard writer
-    #    writer = SummaryWriter(args.tboard_dir)
     
     
     ### 1.2: read data; build pytorch dataloaders 
@@ -296,7 +275,6 @@ def hparam_sweep(args, output_from_loading_func):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
-            # DEBUG: turned jit off
             out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
@@ -336,52 +314,6 @@ def hparam_sweep(args, output_from_loading_func):
         if epoch_train_loss < best_train_loss:
             # swap the flag
             record_results = True
-            
-            ## output all possible things needed to load a model later
-            #OUT_forLoad = {'subst_model_type': args.subst_model_type,
-            #               'equl_model_type': args.equl_model_type,
-            #               'indel_model_type': args.indel_model_type,
-            #               'norm': args.norm,
-            #               'alphabet_size': args.alphabet_size,
-            #               't_grid_center': args.t_grid_center,
-            #               't_grid_step': args.t_grid_step,
-            #               't_grid_num_steps': args.t_grid_num_steps,
-            #               'subsOnly': args.subsOnly,
-            #               'exch_files': args.exch_files
-            #               }
-            
-            #if 'diffrax_params' in dir(args):
-            #    OUT_forLoad['diffrax_params'] = args.diffrax_params
-            
-            #if 'tie_params' in dir(args):
-            #    OUT_forLoad['tie_params'] = args.tie_params
-                
-            ## add (possibly transformed) parameters
-            #for key, val in params.items():
-            #    if val.shape == (1,):
-            #        OUT_forLoad[key] = val.item()
-            #    else:
-            #        OUT_forLoad[key] = np.array(val).tolist()
-            
-            ## undo any possible parameter transformations and add to 
-            ##   1.) the dictionary of all possible things needed to load a 
-            ##   model, and 2.) a human-readable JSON of parameters
-            #OUT_params = {}
-            #for modelClass in pairHMM:
-            #    params_toWrite = modelClass.undo_param_transform(params)
-            #    OUT_forLoad = {**OUT_forLoad, **params_toWrite}
-            #    OUT_params = {**OUT_params, **params_toWrite}
-
-            #OUT_params['epoch_of_training']= epoch_idx
-            
-            ## dump json files
-            #with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
-            #    json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
-            #del OUT_forLoad
-            
-            #with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
-            #    json.dump(OUT_params, g, indent="\t", sort_keys=True)
-            #del OUT_params
             
             # record to log file
             with open(args.logfile_name,'a') as g:
@@ -431,17 +363,6 @@ def hparam_sweep(args, output_from_loading_func):
             epoch_test_sum_logP += batch_test_sum_logP
             del batch_test_sum_logP
             
-            ## if record_results is triggered (by section 2.4), also record
-            ## the log losses per sample
-            #if record_results:
-            #    # get the batch sample labels, associated metadata
-            #    eval_sample_idxes = batch[-1]
-            #    meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
-            #    
-            #    # add loss terms
-            #    meta_df_forBatch[eval_col_title] = logprob_per_sample
-            #    
-            #    eval_df_lst.append(meta_df_forBatch)
 
         # get the average epoch_test_loss by aggregating via -jnp.mean(); record
         epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
@@ -451,21 +372,6 @@ def hparam_sweep(args, output_from_loading_func):
         ## output the metadata + losses dataframe, along with what epoch 
         ##   you're recording results; place this outside of folders
         if record_results:
-        #    eval_df = pd.concat(eval_df_lst)
-            
-            ### DEBUG OPTION
-            # # make sure this average matches the average from epoch_test_loss
-            # loss_from_df = -eval_df[eval_col_title].mean()
-            # assert jnp.allclose(loss_from_df, epoch_test_loss, rtol=1e-3)
-            # del loss_from_df
-            
-            
-            #with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
-            #    g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
-            #    eval_df.to_csv(g, sep='\t')
-            
-            # also make sure to record "best_test_loss" i.e. the test loss
-            #   whenever best training loss is reached
             best_test_loss = epoch_test_loss
 
 
@@ -492,10 +398,6 @@ def hparam_sweep(args, output_from_loading_func):
         # remember this epoch's loss for next iteration
         prev_test_loss = epoch_test_loss
         
-        
-    ### when you're done with the function, close the tensorboard writer
-    #writer.close()
-
 
     ### if early stopping was never triggered, record results at last epoch
     if early_stopping_counter != args.patience:

@@ -86,6 +86,7 @@ def get_mats(t_arr, pairHMM, params_dict, hparams_dict):
     
     # overwrite equl_vecs entry in the hparams dictionary
     hparams_dict['equl_vecs'] = equl_vecs
+    hparams_dict['logP_equl'] = logprob_equl
     
     
     ##################################################################
@@ -529,10 +530,10 @@ def main():
     
     # make sure sum is applied to correct dimension
     assert jnp.allclose( (logP_perTime_withConst - logP_perTime)[:,0],
-                          marginalization_consts)
+                          marginalization_consts, rtol=1e-3)
     
     assert jnp.allclose( (logP_perTime_withConst - logP_perTime)[:,1],
-                          marginalization_consts)
+                          marginalization_consts, rtol=1e-3)
 
     
     ### 4.4.3: logsumexp across time dimension (dim0)

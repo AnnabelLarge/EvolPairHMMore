@@ -10,12 +10,9 @@ ABOUT:
 Evaluate pair alignments based solely on substitution model and 
   match sites (toss indel sites)
 
-Only used for single model (since there's no parameters to train)
+Only used for single model (where you'd read substitution matrix params from
+  an exchangeabilities file)
 
-TODO:
-=====
-This is actually very similar to eval_pairHMM (just reading a preset config, 
-  instead of loading params); maybe combine them if you have the time?
 """
 import os
 import pickle
@@ -93,6 +90,9 @@ def eval_subsOnly(args):
     ### 1: SETUP #
     ##############
     ### 1.1: output file for individual results per sample
+    if args.training_wkdir not in os.listdir():
+        os.mkdir(args.training_wkdir)
+        
     output_persamp_file = f'{args.training_wkdir}/{args.runname}_LOGPROB-PER-SAMP.tsv'
     output_ave_file = f'{args.training_wkdir}/{args.runname}_AVE-LOGPROB.tsv'
     
@@ -235,12 +235,6 @@ def eval_subsOnly(args):
     # also get averge loss by aggregating with -jnp.mean()
     epoch_eval_loss = float( -( eval_sum_logP/len(test_dset) ) )
     del eval_sum_logP
-        
-    ### DEBUG OPTION
-    # # make sure this average matches the average from epoch_test_loss
-    #     loss_from_df = -eval_df[eval_col_title].mean()
-    #     assert jnp.allclose(loss_from_df, epoch_eval_loss, rtol=1e-3)
-    #     del loss_from_df
 
     # output to files
     with open(output_persamp_file,'w') as g:
@@ -285,6 +279,12 @@ if __name__ == '__main__':
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
         args = parser.parse_args(namespace=t_args)
+    
+    # override some of the options for this specific use case
+    args.subsOnly = True
+    args.subst_model_type = 'subst_base'
+    args.equl_model_type = 'equl_base'
+    args.indel_model_type = None
     
     # run training function
     eval_subsOnly(args)

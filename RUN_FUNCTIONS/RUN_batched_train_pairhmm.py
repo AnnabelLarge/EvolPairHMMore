@@ -10,21 +10,6 @@ ABOUT:
 same as train_pairhmm, but for a list of JSON configs using the same dataset
   (dataset retrieved from first file)
 
-
-TODO:
-=====
-medium:
--------
-- remove the option to calculate counts on the fly, and just make this a 
-  separate pre-processing script (I don't ever use it...)
-
-
-far future:
------------
-For now, using LG08 exchangeability matrix, but in the future, could use 
-  CherryML to calculate a new rate matrix for my specific pfam dataset?
-  https://github.com/songlab-cal/CherryML
-
 """
 import os
 import pickle
@@ -295,7 +280,6 @@ def train_batch(args, output_from_loading_func):
                 allCounts = (batch[0], batch[1], batch[2], batch[3])
             
             # take a step using minibatch gradient descent
-            # DEBUG: turned jit off
             out = jitted_train_fn(all_counts = allCounts, 
                                   t_arr = t_array, 
                                   pairHMM = pairHMM, 
@@ -455,13 +439,6 @@ def train_batch(args, output_from_loading_func):
         #   you're recording results; place this outside of folders
         if record_results:
             eval_df = pd.concat(eval_df_lst)
-            
-            ### DEBUG OPTION
-            # # make sure this average matches the average from epoch_test_loss
-            # loss_from_df = -eval_df[eval_col_title].mean()
-            # assert jnp.allclose(loss_from_df, epoch_test_loss, rtol=1e-3)
-            # del loss_from_df
-            
             
             with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
                 g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')

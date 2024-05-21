@@ -70,7 +70,8 @@ def main():
     test_out = summarize_alignment_jitted(batch=fake_batch, 
                                           max_seq_len=5, 
                                           alphabet_size=4, 
-                                          gap_tok=63)
+                                          gap_tok=63,
+                                          subsOnly=False)
     
     subCounts_persamp =   test_out[0]
     insCounts_persamp =   test_out[1]
