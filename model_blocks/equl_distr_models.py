@@ -84,7 +84,7 @@ class equl_base:
         # equilibrium distribution of amino acids, probably provided by 
         # the dataloader? make sure to give it an extra k_equl dimension
         equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_from_train_data'], -1)
-        equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, 1)
+        equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, smallest_float32)
         logprob_equl = jnp.log(equl_vec_noZeros)
         
         return (equl_vec, logprob_equl)
@@ -308,10 +308,10 @@ class equl_dirichletMixture(equl_base):
         # sample; dirichlet_shape is (alphabet_size, k_equl)
         equl_vec = self.sample_dirichlet(dirichlet_samp_key, dirichlet_shape, k_equl)
         
-        # replace zeros with 1 such that log(1)=0
+        # replace zeros with small numbers
         equl_vec_noZeros = jnp.where(equl_vec != 0, 
                                      equl_vec, 
-                                     1)
+                                     smallest_float32)
         
         ### log transform for logprob_equl
         logprob_equl = jnp.log(equl_vec_noZeros)

@@ -8,7 +8,7 @@ Created on Mon Jun 17 20:15:09 2024
 from torch.utils.data import DataLoader
 
 
-def init_dataloaders(args):
+def init_dataloaders(args, onlyTest=False):
     ### DECIDE TRAINING MODE
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
@@ -27,16 +27,6 @@ def init_dataloaders(args):
         
         
     ### READ WITH PYTORCH DATALOADERS    
-    # training data
-    print(f'Creating DataLoader for training set with {args.train_dset_splits}')
-    training_dset = hmm_reader(data_dir = args.data_dir, 
-                                split_prefixes = args.train_dset_splits,
-                                subsOnly = args.subsOnly)
-    training_dl = DataLoader(training_dset, 
-                              batch_size = args.batch_size, 
-                              shuffle = True,
-                              collate_fn = collator)
-    
     # test data
     print(f'Creating DataLoader for test set with {args.test_dset_splits}')
     test_dset = hmm_reader(data_dir = args.data_dir, 
@@ -47,7 +37,21 @@ def init_dataloaders(args):
                           shuffle = False,
                           collate_fn = collator)
     
-    # wrap output into a tuple
-    out_tup = (training_dset, training_dl, test_dset, test_dl)
+    # wrap output into a list
+    out_lst = [test_dset, test_dl]
     
-    return out_tup
+    if not onlyTest:
+        # training data
+        print(f'Creating DataLoader for training set with {args.train_dset_splits}')
+        training_dset = hmm_reader(data_dir = args.data_dir, 
+                                    split_prefixes = args.train_dset_splits,
+                                    subsOnly = args.subsOnly)
+        training_dl = DataLoader(training_dset, 
+                                  batch_size = args.batch_size, 
+                                  shuffle = True,
+                                  collate_fn = collator)
+        
+        # add to out list
+        out_lst = [training_dset, training_dl] + out_lst
+    
+    return out_lst

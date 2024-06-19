@@ -91,51 +91,56 @@ def logsumexp_where(a, axis, where,
     return out
 
 
-def logsumexp_OLD(x, axis):
-    """
-    this used to be the version of logsumexp I used (which would ignore values
-      whenever the input was zero)
-    
-    problem was: it doesn't keep as many significant digits as 
-                 jax's own logsumexp
-    
-    see this about NaN's and jnp.where-
-    https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-
-      where-using-where:~:text=f32%5B1%2C3%5D%7B1%2C0%7D-,Gradients%20
-      contain%20NaN%20where%20using%20where,-%23
-    """
-    zero_val_mask = jnp.where(x != 0,
-                              1,
-                              0)
-    
-    exp_x = jnp.exp(x)
-    exp_x_masked = exp_x * zero_val_mask
-    sumexp_x = jnp.sum(exp_x_masked, axis=axis)
-    
-    logsumexp_x = jnp.log(jnp.where(sumexp_x > 0., 
-                                    sumexp_x, 
-                                    1.))
-    return logsumexp_x
-
-
 def make_fake_batch():
     """
     For testing small bits of code, if needed
     """
     # has one deletion
     samp1 = jnp.array([[3, 4,  5, 6, 7, 0],
-                       [3, 4, 63, 6, 7, 0]])
+                        [3, 4, 63, 6, 7, 0]])
     
     # has one insertion
     samp2 = jnp.array([[3, 4, 63, 6, 7, 8],
-                       [3, 4,  5, 6, 7, 8]])
+                        [3, 4,  5, 6, 7, 8]])
     
     # has one substitution
     samp3 = jnp.array([[3, 4,  5, 6, 0, 0],
-                       [3, 4, 12, 6, 0, 0]])
+                        [3, 4, 12, 6, 0, 0]])
     
     # wrap in a batch; final size is (3, 2, 6)
     fake_batch = jnp.concatenate([jnp.expand_dims(samp1, 0),
                                   jnp.expand_dims(samp2, 0),
                                   jnp.expand_dims(samp3, 0)], 0)
     return fake_batch
+
+
+
+
+
+# def logsumexp_OLD(x, axis):
+#     """
+#     this used to be the version of logsumexp I used (which would ignore values
+#       whenever the input was zero)
+    
+#     problem was: it doesn't keep as many significant digits as 
+#                  jax's own logsumexp
+    
+#     see this about NaN's and jnp.where-
+#     https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-
+#       where-using-where:~:text=f32%5B1%2C3%5D%7B1%2C0%7D-,Gradients%20
+#       contain%20NaN%20where%20using%20where,-%23
+#     """
+#     zero_val_mask = jnp.where(x != 0,
+#                               1,
+#                               0)
+    
+#     exp_x = jnp.exp(x)
+#     exp_x_masked = exp_x * zero_val_mask
+#     sumexp_x = jnp.sum(exp_x_masked, axis=axis)
+    
+#     logsumexp_x = jnp.log(jnp.where(sumexp_x > 0., 
+#                                     sumexp_x, 
+#                                     1.))
+#     return logsumexp_x
+
+

@@ -126,6 +126,7 @@ class subst_base:
         
         # logP = log(expm(Rt))
         # R is (alph, alph, k_subst=1, k_equl), but expm needs square matrices
+        # if expm(Rt) is zero, this will throw some errors
         for_mat_expm = R_mat * t
         for_mat_expm_reshaped = jnp.reshape( for_mat_expm, 
                                             (for_mat_expm.shape[0],

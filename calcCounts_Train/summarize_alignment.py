@@ -130,7 +130,7 @@ def count_transitions(one_alignment_path, start_idxes):
 ### MAIN FUNCTION #
 ###################
 def summarize_alignment(batch, max_seq_len, subsOnly, 
-                        alphabet_size=20, gap_tok=63):
+                        alphabet_size=20, gap_tok=43):
     """
     batch:
     ------

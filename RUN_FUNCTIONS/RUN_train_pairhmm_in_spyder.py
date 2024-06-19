@@ -62,8 +62,8 @@ def generate_fake_model(args):
     
 class FakeArgparse:
     def __init__(self):
-       	self.training_wkdir= "DELETE_ME"
-       	self.runname= "develop_code"
+       	self.training_wkdir= "EXAMPLE_OUT"
+       	self.runname= "run1"
        	self.rng_seednum= 0
         self.debug=True
        
@@ -95,6 +95,7 @@ class FakeArgparse:
        
        	self.indel_model_type= "GGI_single"
        	self.tie_params= False
+           
        	self.lam= 0.5
        	self.mu= 0.5
        	self.x= 0.5

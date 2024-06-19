@@ -31,6 +31,11 @@ def model_import_register(args):
         from model_blocks.protein_subst_models import subst_base as subst_model
         logfile_msg1 = (f'1.) substitution model: subst_base;'+
                         f' (norm: {args.norm})\n')
+
+    elif args.subst_model_type == 'hky85':
+        from model_blocks.dna_subst_models import hky85 as subst_model
+        logfile_msg1 = (f'1.) substitution model: HKY85 (DNA model);'+
+                        f' (norm: {args.norm})\n')
         
     ### come back to this model if you make rate classes depend on other 
     ###   factors (this is kind of useless right now)

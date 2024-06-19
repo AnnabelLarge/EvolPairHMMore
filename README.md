@@ -19,23 +19,23 @@
 ## CLI implementations
 To run, move the desired function from `RUN_FUNCTIONS` folder to top-level directory. Also make sure data folder in top-level directory. Syntax for all functions is generally `CUDA_VISIBLE_DEVICES=[n], python [RUN_script.py] [input_flag] [config_location]`. If the input flag is `--config-file`, then provide a JSON. If the input flag is `--config-folder`, then provide a folder name; all JSON files will be read from this folder.
 
-The training functions are:
-|                              | saves model params? | input flag        | descr                                                                          |
-|------------------------------|---------------------|-------------------|--------------------------------------------------------------------------------|
-| RUN_train_pairhmm.py         | YES                 | `--config-file`   | train one HMM model from a single config                                       |
-| RUN_batched_train_pairhmm.py | YES                 | `--config-folder` | train many HMM models, from configs in a folder (all must use same dataset)                                |
-| RUN_hparam_sweep.py          | no                  | `--config-folder` | run a hyperparameter sweep for HMM models, from configs in a folder (all must use same dataset)            |
-| RUN_fit_predict_mixtures.py  | YES                 | `--config-file`   | train one mixture HMM model and predict group membership, from a single config |
-
-The eval functions are:
-|                      | input flag      | descr                                                                                   |
-|----------------------|-----------------|-----------------------------------------------------------------------------------------|
-| RUN_eval_pairhmm.py  | `--config-file` | load from a previously-saved model, and eval on a new dataset                           |
-| RUN_eval_subsOnly.py | `--config-file` | evaluate log-likelihoods using one substitution model (with exchangeabilities provided) |
-
-
+The functions are:
+  - RUN_train_pairhmm.py
+    - DESCR: train a pairHMM evolution model; save model params
+    - INPUT FLAGS: 
+        - `--config-file`: name of the config file
+  - RUN_eval_pairhmm.py
+    - DESCR: load pairHMM parameters and evaluate likelihoods of a new dataset
+    - INPUT FLAGS:
+        - `--config-file`: name of the config file
+  - RUN_batched_function.py
+    - DESCR: do one of the above, but with ONE dataset and MULTIPLE configs
+    - INPUT FLAGS:
+        - `--config-folder`: name of the folder of config files; run all, in no particular order
+        - `--task`: which task to run (either `train` for `RUN_train_pairhmm.py` or `eval` for `RUN_eval_pairhmm.py`)
+ 
 ## Config File Fields: training functions 
-All training functions will use some variety of these inputs; see `example_runs` for examples of configs.
+see `example_runs` for examples of configs.
 ### general setup
 - **training_wkdir** [str]: the larger training directory
 - **runname** [str]: the run-specific name; multiple runs can reside in the same training directory
@@ -94,7 +94,6 @@ Both eval functions will use these inputs, or some subset of these inputs; see `
 - For now, using LG08 exchangeability matrix, but in the future, could use [CherryML](https://github.com/songlab-cal/CherryML) to calculate a new exchangeability matrix for my specific pfam dataset?
 
 ### low priority
-- combine all training functions under one general, flexible run function
-- combine all eval functions under one general, flexible run function
+- add example runs to this repo
 - remove the option to calculate counts on the fly; I don't ever use it
 

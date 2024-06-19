@@ -18,6 +18,7 @@ if __name__ == '__main__':
     import os
     
     from RUN_FUNCTIONS.RUN_train_pairhmm import train_pairhmm
+    from RUN_FUNCTIONS.RUN_eval_pairhmm import eval_pairhmm
     from utils.init_dataloaders import init_dataloaders
     
     
@@ -36,10 +37,26 @@ if __name__ == '__main__':
                         required=True,
                         help='Load configs from this folder, in json format.')
     
-    # parse the arguments
+    parser.add_argument('--task',
+                        type=str,
+                        required=True,
+                        help='[train] or [eval]')
+    
+    # parse the arguments; determine the task
     init_args = parser.parse_args()
     
     
+    if init_args.task == 'train':
+        fn = train_pairhmm
+    
+    elif init_args.task == 'eval':
+        fn = eval_pairhmm
+    
+    else:
+        print('PICK EITHER: train, eval')
+    
+    
+
     ### MAIN PROGRAM
     # find all the json files in the folder
     file_lst = [file for file in os.listdir(init_args.config_folder) if file.endswith('.json')]
@@ -56,14 +73,14 @@ if __name__ == '__main__':
     
     # iterate through all config files with this same data tuple
     for config_file in file_lst:
-        print(f'STARTING TRAINING FROM: {config_file}')
+        print(f'STARTING TASK FROM: {config_file}')
         to_open = f'./{init_args.config_folder}/{config_file}'
         with open(to_open, 'r') as f:
             t_args = argparse.Namespace()
             t_args.__dict__.update(json.load(f))
             this_config_args = parser.parse_args(namespace=t_args)
         
-        # run training function with this config file
-        train_pairhmm(this_config_args, data_tup)
+        # run function with this config file
+        fn(this_config_args, data_tup)
         
         print()

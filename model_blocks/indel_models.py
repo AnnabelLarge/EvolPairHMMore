@@ -285,8 +285,8 @@ class GGI_single:
                                      alphabet_size,
                                      **diffrax_params)
         
-        # if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
+        # if any position in transmat is zero, replace with smallest float
+        transmat = jnp.where(transmat != 0, transmat, smallest_float32)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
@@ -621,8 +621,8 @@ class TKF91_single(GGI_single):
         alpha, beta = self.TKF_alpha_beta(lam, mu, t)
         transmat = TKF91_Ftransitions (alpha, beta, lam, mu, t)
         
-        ### if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
+        # if any position in transmat is zero, replace with smallest float
+        transmat = jnp.where(transmat != 0, transmat, smallest_float32)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
@@ -814,8 +814,8 @@ class TKF92_single(TKF91_single):
         alpha, beta = self.TKF_alpha_beta(lam, mu, t)
         transmat = TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t)
         
-        ### if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
+        # if any position in transmat is zero, replace with smallest float
+        transmat = jnp.where(transmat != 0, transmat, smallest_float32)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t
@@ -1025,8 +1025,8 @@ class otherIndel_single:
         ### find transition matrix
         transmat = self.transition_function(lam, mu, x, y, t)
         
-        # if any position in transmat is zero, replace with 1 such that log(1)=0
-        transmat = jnp.where(transmat != 0, transmat, 1)
+        # if any position in transmat is zero, replace with smallest float
+        transmat = jnp.where(transmat != 0, transmat, smallest_float32)
         logprob_transition_at_t = jnp.log(transmat)
         
         return logprob_transition_at_t

@@ -8,8 +8,9 @@ Created on Wed Jan 17 11:18:49 2024
 ABOUT:
 ======
 Load aligned pfams, optionally calculate emission and transition 
-  counts from pair alignments. Possibility of single or mixture models
-  over substitutions, equilibrium distributions, and indel models
+  counts from pair alignments, and fit model params. Possibility 
+  of single or mixture models over substitutions, equilibrium 
+  distributions, and indel models
 
 """
 import os
@@ -31,7 +32,6 @@ from torch.utils.tensorboard import SummaryWriter
 from utils.setup_utils import setup_training_dir, model_import_register
 from utils.training_testing_fns import train_fn, eval_fn
 from utils.init_dataloaders import init_dataloaders
-from utils.retrieve_transition_mats import retrieve_transition_mats
 
 
 
@@ -131,9 +131,9 @@ def train_pairhmm(args, dataloader_tup):
     
     
     ### use the helper function to import/initialize dataloaders
-    # from "dataloader_tup = init_dataloaders(args)"
-    training_dset, training_dl, test_dset, test_dl = dataloader_tup
-    del dataloader_tup
+    # from "dataloader_lst = init_dataloaders(args)"
+    training_dset, training_dl, test_dset, test_dl = dataloader_lst
+    del dataloader_lst
     
     training_global_max_seqlen = training_dset.max_seqlen()
     test_global_max_seqlen = test_dset.max_seqlen()
@@ -189,9 +189,9 @@ def train_pairhmm(args, dataloader_tup):
     hparams = {**equl_model_hparams, **subst_model_hparams, **indel_model_hparams}
     
     # if it hasn't already been specified in the JSON file, set the gap_tok
-    #   to default value of 63; this is only used for calculating counts
+    #   to default value of 43; this is only used for calculating counts
     if 'gap_tok' not in dir(args):
-        hparams['gap_tok'] = 63
+        hparams['gap_tok'] = 43
     else:
         hparams['gap_tok'] = args.gap_tok
     
@@ -433,29 +433,9 @@ def train_pairhmm(args, dataloader_tup):
         pickle.dump(to_save, g)
         del to_save
     
-    
-    ### save hyperparameters and some of the argparse
-    # pickle the hyperparameters
-    with open(f'{args.model_ckpts_dir}/hparams_dict.pkl','wb') as g:
-        to_save = {**epoch_idx_addition, **hparams}
-        pickle.dump(to_save, g)
-        del to_save
-    
-    # pickle the entire original argparse object, after removing some 
-    # useless things
-    forLoad = dict(vars(args))
-    
-    to_remove = ['training_wkdir', 'runname', 'rng_seednum','have_precalculated_counts',
-                 'loadtype', 'data_dir','training_dset_splits','test_dset_splits',
-                 'batch_size', 'num_epochs', 'learning_rate', 'patience',
-                 'loss_type', 'early_stop_rtol']
-    for varname in to_remove:
-        if varname in forLoad.keys():
-            del forLoad[varname]
-    forLoad = {**epoch_idx_addition, **forLoad}
-    
-    with open(f'{args.model_ckpts_dir}/forLoad_dict.pkl','wb') as g:
-        pickle.dump(forLoad, g)
+    # pickle the entire original argparse object
+    with open(f'{args.model_ckpts_dir}/forLoad_argparse.pkl','wb') as g:
+        pickle.dump(args, g)
     
     
     ### add to outfile

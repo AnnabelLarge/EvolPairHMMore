@@ -25,10 +25,10 @@ outputs:
 
 Data to be read:
 =================
-1. Numpy matrix of sequences: a tensor of size (2, num_pairs, max_len), where 
-   dim0 corresponds to-
-    - (dim0=0): aligned ancestor
-    - (dim0=1): aligned descendant
+1. Numpy matrix of sequences: a tensor of size (num_pairs, 2, max_len), where 
+   dim1 corresponds to-
+    - (dim1=0): aligned ancestor
+    - (dim1=1): aligned descendant
 
   All sequences have been categorically encoded (20 possible aa tokens + pad token)
   
@@ -97,7 +97,7 @@ class HMMDset(Dataset):
         return self.data_mat.shape[1]
 
     def __getitem__(self, idx):
-        sample_seqs = self.data_mat[:, idx, :]
+        sample_seqs = self.data_mat[idx, :, :]
         sample_align_len = self.lengths_vec[idx]
         sample_idx = idx
         return (sample_seqs, sample_align_len, sample_idx)

@@ -44,6 +44,7 @@ class hky85:
             R_mat = self.zero_rate_matrix_row_sums (jnp.array (R_mat))
         
         # submat = log(exp(Rt)); (alph, alph)
+        # if needed, place some condition here for if R_mat * t == 0
         cond_logprob_substitution_at_t = jnp.log(expm(R_mat * t))
         
         # for now, this ignores potential for k_subst or k_equl; just expand
