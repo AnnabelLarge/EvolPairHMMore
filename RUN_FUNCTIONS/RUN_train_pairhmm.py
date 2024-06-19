@@ -30,40 +30,44 @@ from torch.utils.tensorboard import SummaryWriter
 # custom imports
 from utils.setup_utils import setup_training_dir, model_import_register
 from utils.training_testing_fns import train_fn, eval_fn
+from utils.init_dataloaders import init_dataloaders
+from utils.retrieve_transition_mats import retrieve_transition_mats
 
 
 
 
 
-def train_pairhmm(args):
-    #################################################
-    ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES #
-    #################################################
+def train_pairhmm(args, dataloader_tup):
+    ###########################################################################
+    ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES    ########################
+    ###########################################################################
+    print('0: checking config')
+    
+    # if not provided, assume not in debug mode
+    if 'debug' not in vars(args):
+        args.debug = False
+    
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
     assert args.loadtype == 'eager'
     
-    ### 0.1: DECIDE MODEL PARTS TO IMPORT, REGISTER AS PYTREES
+    ### DECIDE MODEL PARTS TO IMPORT, REGISTER AS PYTREES
     out = model_import_register(args)
     subst_model, equl_model, indel_model, logfile_msg = out
     del out
     
-    ### 0.2: DECIDE TRAINING MODE
+    
+    ### DECIDE TRAINING MODE
     # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:
         to_add = ('Reading from precalculated counts matrices before'+
                   ' training\n\n')
-        from onlyTrain.hmm_dataset import HMMDset_PC as hmm_reader
-        from onlyTrain.hmm_dataset import jax_collator as collator
         
     # Use this training mode if you need to calculate emission and transition  
     #   counts from pair alignments
     elif not args.have_precalculated_counts:
         to_add = ('Calculating counts matrices from alignments, then'+
                   ' training\n\n')
-        from calcCounts_Train.hmm_dataset import HMMDset as hmm_reader
-        from calcCounts_Train.hmm_dataset import jax_collator as collator
-        from calcCounts_Train.summarize_alignment import summarize_alignment
         
         # Later, clip the alignments to one of four possible alignment lengths, 
         #   thus jit-compiling four versions of summarize_alignment
@@ -88,10 +92,11 @@ def train_pairhmm(args):
     del to_add
     
         
-    ##############
-    ### 1: SETUP #
-    ##############
-    ### 1.1: rng key, folder setup, etc.
+    ###########################################################################
+    ### 1: SETUP   ############################################################
+    ###########################################################################
+    print(f'1: setup')
+    ### rng key, folder setup, etc.
     # setup folders; manually create model checkpoint directory (i.e. what 
     #   orbax would normally do for you)
     setup_training_dir(args)
@@ -109,42 +114,40 @@ def train_pairhmm(args):
         g.write('TRAINING PROG:\n')
     
     # setup tensorboard writer
-        writer = SummaryWriter(args.tboard_dir)
+    writer = SummaryWriter(args.tboard_dir)
+    
+    # if debugging, set up an intermediates folder
+    folder_path = f'{os.getcwd()}/{args.training_wkdir}/HMM_INTERMEDIATES'
+    subfolder_path = f'{folder_path}/{args.runname}'
+    
+    if not os.path.exists(folder_path):
+        os.mkdir(folder_path)
+    
+    if not os.path.exists(subfolder_path):
+        os.mkdir(subfolder_path)
+    
+    args.intermediates_folder = subfolder_path
+    del folder_path, subfolder_path
     
     
-    ### 1.2: read data; build pytorch dataloaders 
-    # 1.2.1: training data
-    print(f'Creating DataLoader for training set with {args.train_dset_splits}')
-    training_dset = hmm_reader(data_dir = args.data_dir, 
-                               split_prefixes = args.train_dset_splits,
-                               subsOnly = args.subsOnly)
-    training_dl = DataLoader(training_dset, 
-                             batch_size = args.batch_size, 
-                             shuffle = True,
-                             collate_fn = collator)
+    ### use the helper function to import/initialize dataloaders
+    # from "dataloader_tup = init_dataloaders(args)"
+    training_dset, training_dl, test_dset, test_dl = dataloader_tup
+    del dataloader_tup
+    
     training_global_max_seqlen = training_dset.max_seqlen()
-    
-    # 1.2.2: test data
-    print(f'Creating DataLoader for test set with {args.test_dset_splits}')
-    test_dset = hmm_reader(data_dir = args.data_dir, 
-                              split_prefixes = args.test_dset_splits,
-                              subsOnly = args.subsOnly)
-    test_dl = DataLoader(test_dset, 
-                         batch_size = args.batch_size, 
-                         shuffle = False,
-                         collate_fn = collator)
     test_global_max_seqlen = test_dset.max_seqlen()
     
     
-    ### 1.3: quantize time in geometric spacing, just like in cherryML
+    ### quantize time in geometric spacing, just like in cherryML
     quantization_grid = range(-(args.t_grid_num_steps-1), 
                               args.t_grid_num_steps, 
                               1)
     t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
     
-    ### 1.4: column header for output eval depends on which probability is
-    ###      being calculated
+    ### column header for output eval depends on which probability is
+    ###   being calculated
     if args.loss_type == 'conditional':
         eval_col_title = 'logP(A_t|A_0,model)'
     
@@ -153,27 +156,32 @@ def train_pairhmm(args):
         
     
     
-    ###########################
-    ### 2: INITIALIZE MODEL   #
-    ###########################
-    ### 2.1: initialize the equlibrium distribution(s)
+    ###########################################################################
+    ### 2: INITIALIZE MODEL   #################################################
+    ###########################################################################
+    print('2: model init')
+    ### initialize the equlibrium distribution(s)
     equl_model_params, equl_model_hparams = equl_model.initialize_params(argparse_obj=args)
     
-    # if this is the base model or the placeholder, use the equilibrium 
-    #   distribution from TRAINING data
+    # if this is the base model, use the equilibrium distribution from 
+    #   TRAINING data
     if args.equl_model_type == 'equl_base':
-        equl_model_hparams['equl_vecs_fromData'] = training_dset.retrieve_equil_dist()
+        equl_model_hparams['equl_vecs_from_train_data'] = training_dset.retrieve_equil_dist()
+    
+    # if you're not scoring emissions from indels at all, use this placeholder
+    elif args.equl_model_type == 'no_equl':
+        equl_model_hparams['equl_vecs_from_train_data'] = jnp.zeros((args.alphabet_size))
     
     
-    ### 2.2: initialize the substitution model
+    ### initialize the substitution model
     subst_model_params, subst_model_hparams = subst_model.initialize_params(argparse_obj=args)
     
     
-    ### 2.3: initialize the indel model
+    ### initialize the indel model
     indel_model_params, indel_model_hparams = indel_model.initialize_params(argparse_obj=args)
     
     
-    ### 2.4: combine all initialized models above
+    ### combine all initialized models above
     # combine all parameters to be passed to optax 
     params = {**equl_model_params, **subst_model_params, **indel_model_params}
     
@@ -194,18 +202,19 @@ def train_pairhmm(args):
     pairHMM = (equl_model, subst_model, indel_model)
     
     
-    ########################
-    ### 3: TRAINING LOOP   #
-    ########################
-    ### 3.1: SETUP FOR TRAINING LOOP
+    ###########################################################################
+    ### 3: TRAINING LOOP   ####################################################
+    ###########################################################################
+    print(f'3: main training loop')
+    ### SETUP FOR TRAINING LOOP
     # initialize optax
     tx = optax.adam(args.learning_rate)
     opt_state = tx.init(params)
     
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
-    jitted_train_fn = jax.jit(train_fn, static_argnames='loss_type')
-    jitted_eval_fn = jax.jit(eval_fn, static_argnames='loss_type')
+    jitted_train_fn = jax.jit(train_fn, static_argnames=['loss_type', 'DEBUG_FLAG'])
+    jitted_eval_fn = jax.jit(eval_fn, static_argnames=['loss_type', 'DEBUG_FLAG'])
     if not args.have_precalculated_counts:
         summarize_alignment_jitted = jax.jit(summarize_alignment, 
                                              static_argnames=['max_seq_len',
@@ -217,20 +226,20 @@ def train_pairhmm(args):
     prev_test_loss = 9999
     early_stopping_counter = 0
     
-    # when to save a model's parameters
+    # what/when to save a model's parameters
     best_epoch = -1
-    best_train_loss = 9999
     best_test_loss = 9999
+    best_params = dict()
+    rng_at_best_epoch = 0
     for epoch_idx in tqdm(range(args.num_epochs)):
         # top of the epoch, these aren't yet determined
         epoch_train_loss = 9999
         epoch_test_loss = 9999
         
-        # default behavior is to not save model parameters or 
-        #   eval set log likelihoods
-        record_results = False
         
-        ### 3.2: TRAINING PHASE
+        ######################
+        ### TRAINING PHASE   #
+        ######################
         epoch_train_sum_logP = 0
         for batch_idx, batch in enumerate(training_dl):
             # fold in epoch_idx and batch_idx for training
@@ -260,22 +269,21 @@ def train_pairhmm(args):
                                   hparams_dict = hparams,
                                   training_rngkey = rngkey_for_training,
                                   loss_type = args.loss_type)
-            _, batch_train_sum_logP, param_grads = out
+            aux_dict, param_grads = out
             del out
 
-            
             # update the parameters dictionary with optax
             updates, opt_state = tx.update(param_grads, opt_state)
             params = optax.apply_updates(params, updates)
             
             # add to total loss for this epoch
-            epoch_train_sum_logP += batch_train_sum_logP
-            
-            del batch_train_sum_logP
+            epoch_train_sum_logP += aux_dict['sum_logP']
         
         
-        ### 3.3: GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD
-        # aggregate with the equilvalent of -jnp.mean()
+        ######################################################
+        ### GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD   #
+        ######################################################
+        # aggregate by dividing the sum by the total number of training samples
         epoch_train_loss = float( -( epoch_train_sum_logP/len(training_dset) ) )
         writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
@@ -288,76 +296,10 @@ def train_pairhmm(args):
         # free up variables
         del batch, allCounts, epoch_train_sum_logP
 
-
-        ### 3.4: IF THE TRAINING LOSS IS BETTER, SAVE MODEL WITH PARAMETERS
-        if epoch_train_loss < best_train_loss:
-            # swap the flag
-            record_results = True
-            
-            # output all possible things needed to load a model later
-            OUT_forLoad = {'subst_model_type': args.subst_model_type,
-                           'equl_model_type': args.equl_model_type,
-                           'indel_model_type': args.indel_model_type,
-                           'norm': args.norm,
-                           'alphabet_size': args.alphabet_size,
-                           't_grid_center': args.t_grid_center,
-                           't_grid_step': args.t_grid_step,
-                           't_grid_num_steps': args.t_grid_num_steps,
-                           'subsOnly': args.subsOnly,
-                           'exch_files': args.exch_files,
-                           }
-            
-            # for any GGI model
-            if 'diffrax_params' in dir(args):
-                OUT_forLoad['diffrax_params'] = args.diffrax_params
-            
-            # for all indel models except "no_indel"
-            if 'tie_params' in dir(args):
-                OUT_forLoad['tie_params'] = args.tie_params
-
-            # for "other indel models" class
-            if 'model_type' in dir(args):
-                OUT_forLoad['model_type'] = args.model_type
-
-            
-            # add (possibly transformed) parameters
-            for key, val in params.items():
-                if val.shape == (1,):
-                    OUT_forLoad[key] = val.item()
-                else:
-                    OUT_forLoad[key] = np.array(val).tolist()
-            
-            # undo any possible parameter transformations and add to 
-            #   1.) the dictionary of all possible things needed to load a 
-            #   model, and 2.) a human-readable JSON of parameters
-            OUT_params = {}
-            for modelClass in pairHMM:
-                params_toWrite = modelClass.undo_param_transform(params)
-                OUT_forLoad = {**OUT_forLoad, **params_toWrite}
-                OUT_params = {**OUT_params, **params_toWrite}
-
-            OUT_params['epoch_of_training']= epoch_idx
-            
-            # dump json files
-            with open(f'{args.model_ckpts_dir}/toLoad.json', 'w') as g:
-                json.dump(OUT_forLoad, g, indent="\t", sort_keys=True)
-            del OUT_forLoad
-            
-            with open(f'{args.model_ckpts_dir}/params.json', 'w') as g:
-                json.dump(OUT_params, g, indent="\t", sort_keys=True)
-            del OUT_params
-            
-            # record to log file
-            with open(args.logfile_name,'a') as g:
-                g.write(f'New best training loss at epoch {epoch_idx}: {epoch_train_loss}\n')
-            
-            # update save criteria
-            best_epoch = epoch_idx
-            best_train_loss = epoch_train_loss
     
-        
-        ### 3.5: CHECK PERFORMANCE ON HELD-OUT TEST SET
-        eval_df_lst = []
+        ##############################################
+        ### CHECK PERFORMANCE ON HELD-OUT TEST SET   #
+        ##############################################
         epoch_test_sum_logP = 0
         for batch_idx,batch in enumerate(test_dl):
             # fold in epoch_idx and batch_idx for eval (use negative value, 
@@ -387,48 +329,56 @@ def train_pairhmm(args):
                                  params_dict = params, 
                                  hparams_dict = hparams,
                                  eval_rngkey = rngkey_for_eval,
-                                 loss_type = args.loss_type)
+                                 loss_type = args.loss_type,
+                                 DEBUG_FLAG = args.debug)
             
-            _, batch_test_sum_logP, logprob_per_sample = out
+            aux_dict, batch_test_sum_logP = out
             del out
             
             epoch_test_sum_logP += batch_test_sum_logP
             del batch_test_sum_logP
-            
-            # if record_results is triggered (by section 2.4), also record
-            # the log losses per sample
-            if record_results:
-                # get the batch sample labels, associated metadata
-                eval_sample_idxes = batch[-1]
-                meta_df_forBatch = test_dset.retrieve_sample_names(eval_sample_idxes)
-                
-                # add loss terms
-                meta_df_forBatch[eval_col_title] = logprob_per_sample
-                
-                eval_df_lst.append(meta_df_forBatch)
-
-        # get the average epoch_test_loss by aggregating via -jnp.mean(); record
+        
+        
+        ##################################################
+        ### GET THE AVERAGE EPOCH TEST LOSS AND RECORD   #
+        ##################################################
+        # aggregate by dividing the sum by the total number of training samples
         epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
         writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
         del epoch_test_sum_logP, batch
-
-        # output the metadata + losses dataframe, along with what epoch 
-        #   you're recording results; place this outside of folders
-        if record_results:
-            eval_df = pd.concat(eval_df_lst)
-            
-            with open(f'./{args.training_wkdir}/{args.runname}_eval-set-logprobs.tsv','w') as g:
-                g.write(f'#Logprobs using model params from epoch{epoch_idx}\n')
-                eval_df.to_csv(g, sep='\t')
-            
-            # also make sure to record "best_test_loss" i.e. the test loss
-            #   whenever best training loss is reached
+        
+        
+        ###############################
+        ### MODEL SAVING CONDITIONS   #
+        ###############################
+        if epoch_test_loss < best_test_loss:
+            best_epoch = epoch_idx
             best_test_loss = epoch_test_loss
-
-
-        ### 3.6: EARLY STOPPING: if test loss increases for X epochs in a row, 
-        ###      stop training; reset counter if the loss decreases again 
-        ###      (this is directly from Ian)
+            best_params = params
+            rng_at_best_epoch = rngkey_for_eval
+            
+            # record performance
+            with open(args.logfile_name,'a') as g:
+                g.write(f'New best TEST loss at epoch {best_epoch}: {best_test_loss}\n')
+            
+            
+            ### if in debug mode, output the aux dict from the LAST batch of 
+            ### the eval set every time you hit a "best loss"
+            if args.debug:
+                to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
+                aux_dict = {**to_add, **aux_dict}
+                
+                with open(f'{args.intermediates_folder}/test_set_intermediates_epoch{epoch_idx}.pkl', 'wb') as g:
+                    pickle.dump(aux_dict, g)
+                del aux_dict
+            
+    
+        
+        ####################################################################
+        ### EARLY STOPPING: if test loss increases for X epochs in a row,  #
+        ###   stop training; reset counter if the loss decreases again     #
+        ###   (this is directly from Ian)                                  #
+        ####################################################################
         if (jnp.allclose (prev_test_loss, 
                           jnp.minimum (prev_test_loss, epoch_test_loss), 
                           rtol=args.early_stop_rtol) ):
@@ -439,9 +389,6 @@ def train_pairhmm(args):
         if early_stopping_counter == args.patience:
             with open(args.logfile_name,'a') as g:
                 g.write(f'\n\nEARLY STOPPING AT EPOCH {epoch_idx}:\n')
-                g.write(f'Best epoch: {best_epoch}\n')
-                g.write(f'Best training loss: {best_train_loss}\n')
-                g.write(f'Test loss at best epoch: {best_test_loss}\n')
                 
             # rage quit
             break
@@ -449,21 +396,214 @@ def train_pairhmm(args):
         # remember this epoch's loss for next iteration
         prev_test_loss = epoch_test_loss
         
-        
-    ### when you're done with the function, close the tensorboard writer
+
+
+    ###########################################################################
+    ### 4: POST-TRAINING ACTIONS   ############################################
+    ###########################################################################
+    print(f'4: post-training actions')
+    # don't accidentally use old parameters
+    del params
+    
+    # when you're done with the function, close the tensorboard writer
     writer.close()
-
-
-    ### if early stopping was never triggered, record results at last epoch
+    
+    # if early stopping was never triggered, record results at last epoch
     if early_stopping_counter != args.patience:
         with open(args.logfile_name,'a') as g:
             g.write(f'\n\nRegular stopping after {epoch_idx} full epochs:\n')
-            g.write(f'Final training loss: {epoch_train_loss}\n')
-            g.write(f'Final test loss: {epoch_test_loss}\n')
-
+    del epoch_idx
     
     
-
+    ######################
+    ### save best params #
+    ######################
+    # always record WHEN the parameters were saved
+    epoch_idx_addition = {'epoch_of_saved_params': best_epoch}
+        
+    ### save params
+    # undo the parameter transformations
+    for modelClass in pairHMM:
+        untransf_params = modelClass.undo_param_transform(best_params)
+    
+    # pickle the parameters, both transformed and not
+    with open(f'{args.model_ckpts_dir}/params_dict.pkl','wb') as g:
+        to_save = {**best_params, **untransf_params}
+        to_save = {**epoch_idx_addition, **to_save}
+        pickle.dump(to_save, g)
+        del to_save
+    
+    
+    ### save hyperparameters and some of the argparse
+    # pickle the hyperparameters
+    with open(f'{args.model_ckpts_dir}/hparams_dict.pkl','wb') as g:
+        to_save = {**epoch_idx_addition, **hparams}
+        pickle.dump(to_save, g)
+        del to_save
+    
+    # pickle the entire original argparse object, after removing some 
+    # useless things
+    forLoad = dict(vars(args))
+    
+    to_remove = ['training_wkdir', 'runname', 'rng_seednum','have_precalculated_counts',
+                 'loadtype', 'data_dir','training_dset_splits','test_dset_splits',
+                 'batch_size', 'num_epochs', 'learning_rate', 'patience',
+                 'loss_type', 'early_stop_rtol']
+    for varname in to_remove:
+        if varname in forLoad.keys():
+            del forLoad[varname]
+    forLoad = {**epoch_idx_addition, **forLoad}
+    
+    with open(f'{args.model_ckpts_dir}/forLoad_dict.pkl','wb') as g:
+        pickle.dump(forLoad, g)
+    
+    
+    ### add to outfile
+    with open(args.logfile_name,'a') as g:
+        g.write(f'Best epoch: {best_epoch}\n\n')
+        g.write(f'Best params: \n')
+        
+        for key, val in untransf_params.items():
+            g.write(f'{key}: {val}\n')
+        g.write('\n')
+        g.write(f'FINAL LOG-LIKELIHOODS, RE-EVALUATING ALL DATA WITH BEST PARAMS:\n')
+    
+    
+    ###########################################
+    ### loop through training dataloader and  #
+    ### score with best params                #
+    ###########################################    
+    # if this blows up the CPU, output in parts instead
+    final_loglikes_train_set = []
+       
+    for batch_idx, batch in enumerate(training_dl):
+        rng_for_final_train = jax.random.fold_in(rngkey, (10000 + batch_idx + len(training_dl)))
+        
+        # if you DON'T have precalculated counts matrices, will need to 
+        #   clip the batch inputs
+        if not args.have_precalculated_counts:
+            batch_max_seqlen = clip_batch_inputs(batch, 
+                                                 global_max_seqlen = train_global_max_seqlen)
+            allCounts = summarize_alignment_jitted(batch, 
+                                            max_seq_len = batch_max_seqlen, 
+                                            alphabet_size=hparams['alphabet_size'], 
+                                            gap_tok=hparams['gap_tok'],
+                                            subsOnly = args.subsOnly)
+            del batch_max_seqlen
+        
+        # if you have these counts, just unpack the batch
+        elif args.have_precalculated_counts:
+            allCounts = (batch[0], batch[1], batch[2], batch[3])
+        
+        # evaluate batch loss
+        out = jitted_eval_fn(all_counts = allCounts, 
+                             t_arr = t_array, 
+                             pairHMM = pairHMM, 
+                             params_dict = best_params, 
+                             hparams_dict = hparams,
+                             eval_rngkey = rng_for_final_train,
+                             loss_type = args.loss_type)
+        
+        aux_dict, _ = out
+        del out
+        
+        # using batch_idx, generate the initial loss dataframe
+        batch_out_df = training_dset.retrieve_sample_names(batch[-1])
+        batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+                                                      batch_out_df['desc_seq_len'])
+        
+        final_loglikes_train_set.append(batch_out_df)
+    
+    # concatenate values
+    final_loglikes_train_set = pd.concat(final_loglikes_train_set)
+    final_ave_train_loss = final_loglikes_train_set['logP_perSamp'].mean()
+    final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
+    
+    # save whole dataframe and remove from memory
+    final_loglikes_train_set.to_csv(f'{args.training_wkdir}/{args.runname}_train-set_loglikes.tsv', sep='\t')
+    del final_loglikes_train_set
+    
+    # update the logfile with final losses
+    with open(args.logfile_name,'a') as g:
+        g.write(f'Training set average loglike: {final_ave_train_loss}\n')
+        g.write(f'Training set average loglike (normed by desc seq len): {final_ave_train_loss_seqlen_normed}\n\n')
+    
+    # clean up variables
+    del training_dl, training_dset, batch, batch_idx, rng_for_final_train
+    
+    
+    ###########################################
+    ### loop through test dataloader and      #
+    ### score with best params                #
+    ###########################################    
+    # if this blows up the CPU, output in parts instead
+    final_loglikes_test_set = []
+       
+    for batch_idx, batch in enumerate(test_dl):
+        rng_for_final_test = jax.random.fold_in(rngkey, -(10000 + batch_idx + len(test_dl)))
+        
+        # if you DON'T have precalculated counts matrices, will need to 
+        #   clip the batch inputs
+        if not args.have_precalculated_counts:
+            batch_max_seqlen = clip_batch_inputs(batch, 
+                                                 global_max_seqlen = test_global_max_seqlen)
+            allCounts = summarize_alignment_jitted(batch, 
+                                            max_seq_len = batch_max_seqlen, 
+                                            alphabet_size=hparams['alphabet_size'], 
+                                            gap_tok=hparams['gap_tok'],
+                                            subsOnly = args.subsOnly)
+            del batch_max_seqlen
+        
+        # if you have these counts, just unpack the batch
+        elif args.have_precalculated_counts:
+            allCounts = (batch[0], batch[1], batch[2], batch[3])
+        
+        # evaluate batch loss
+        out = jitted_eval_fn(all_counts = allCounts, 
+                             t_arr = t_array, 
+                             pairHMM = pairHMM, 
+                             params_dict = best_params, 
+                             hparams_dict = hparams,
+                             eval_rngkey = rng_for_final_test,
+                             loss_type = args.loss_type,
+                             DEBUG_FLAG = args.debug)
+        
+        aux_dict, _ = out
+        del out
+        
+        # using batch_idx, generate the initial loss dataframe
+        batch_out_df = test_dset.retrieve_sample_names(batch[-1])
+        batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+                                                      batch_out_df['desc_seq_len'])
+        
+        final_loglikes_test_set.append(batch_out_df)
+    
+    # concatenate values
+    final_loglikes_test_set = pd.concat(final_loglikes_test_set)
+    final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
+    final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
+    
+    # save whole dataframe and remove from memory
+    final_loglikes_test_set.to_csv(f'{args.training_wkdir}/{args.runname}_test-set_loglikes.tsv', sep='\t')
+    del final_loglikes_test_set
+    
+    # update the logfile with final losses
+    with open(args.logfile_name,'a') as g:
+        g.write(f'Test set average loglike: {final_ave_test_loss}\n')
+        g.write(f'Test set average loglike (normed by desc seq len): {final_ave_test_loss_seqlen_normed}\n\n')
+    
+    # output the aux dict from the final batch, if debugging
+    if args.debug:
+        to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
+        aux_dict = {**to_add, **aux_dict}
+        
+        with open(f'{args.intermediates_folder}/FINAL_test_set_intermediates.pkl', 'wb') as g:
+            pickle.dump(aux_dict, g)
+            
+    
+    
 ##########################################
 ### BASIC CLI+JSON CONFIG IMPLEMENTATION #
 ##########################################
@@ -498,5 +638,9 @@ if __name__ == '__main__':
         t_args.__dict__.update(json.load(f))
         args = parser.parse_args(namespace=t_args)
     
+    
+    # load data
+    dataloader_tup = init_dataloaders(args)
+    
     # run training function
-    train_pairhmm(args)
+    train_pairhmm(args, dataloader_tup)

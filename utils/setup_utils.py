@@ -207,5 +207,6 @@ def setup_training_dir(args):
     ### script
     args.tboard_dir = tboard_dir
     args.model_ckpts_dir = model_ckpts_dir
+    args.logfile_dir = logfile_dir
     args.logfile_name = f'{logfile_dir}/{logfile_filename}'
             

@@ -163,31 +163,51 @@ class GGI_single:
         """
         provided_args = dir(argparse_obj)
         
-        ### PARAMETERS: ggi params
-        # lambda
-        if 'lam' not in provided_args:
-            lam = 0.5
-        else:
-            lam = argparse_obj.lam
+        ### PARAMETERS: indel rate
+        # first, check if "indel_rate" is provided, meaning you're 
+        #   tying weights
+        if 'indel_rate' in provided_args:
+            lam = argparse_obj.indel_rate
+            mu = argparse_obj.indel_rate
         
-        # mu
-        if 'mu' not in provided_args:
-            mu = 0.5
+        # if this isn't provided, see if lam or mu are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            mu = argparse_obj.mu
+            # lam; DEFAULT=0.5
+            if 'lam' in provided_args:
+                lam = argparse_obj.lam
+            else:
+                lam = 0.5
             
-        # x
-        if 'x' not in provided_args:
-            x = 0.5
-        else:
-            x = argparse_obj.x
+            # mu; DEFAULT=0.5
+            if 'mu' in provided_args:
+                mu = argparse_obj.mu
+            else:
+                mu = 0.5
         
-        # y
-        if 'y' not in provided_args:
-            y = 0.5
-        else:
-            y = argparse_obj.y
         
+        ### PARAMETERS: extension probability
+        # first, check if "extension_prob" is provided, meaning you're 
+        #   tying weights
+        if 'extension_prob' in provided_args:
+            x = argparse_obj.extension_prob
+            y = argparse_obj.extension_prob
+        
+        # if this isn't provided, see if x or y are provided; check these
+        # seperately, in the weird case you may provide one but not the other
+        else:
+            # x; DEFAULT=0.5
+            if 'x' in provided_args:
+                x = argparse_obj.x
+            else:
+                x = 0.5
+            
+            # y; DEFAULT=0.5
+            if 'y' in provided_args:
+                y = argparse_obj.y
+            else:
+                y = 0.5
+                
         ### keep lambda and x
         # transform to (-inf, inf) domain; also add extra k_indel dimension
         lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
@@ -299,12 +319,6 @@ class GGI_single:
             mu = jnp.square(mu_transf)
             y = jnp.exp(-jnp.square(y_transf))
             
-            # also turn them into regular integers, for writing JSON
-            lam = lam.item()
-            mu = mu.item()
-            x = x.item()
-            y = y.item()
-            
             # add to output dictionary
             out_dict['lam'] = lam
             out_dict['mu'] = mu
@@ -315,8 +329,8 @@ class GGI_single:
             ### mu takes on value of lambda, y takes on value of x
             # combine lambda and mu under label "indel rate"
             # combine x and y under label "extension prob"
-            indel_rate = lam.item()
-            extension_prob = x.item()
+            indel_rate = lam
+            extension_prob = x
             
             # add to output dictionary
             out_dict['indel_rate'] = indel_rate
@@ -374,31 +388,52 @@ class GGI_mixture(GGI_single):
         """
         provided_args = dir(argparse_obj)
         
-        ### PARAMETERS: ggi params
-        # lambda
-        if 'lam' not in provided_args:
-            lam = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
-        else:
-            lam = jnp.array(argparse_obj.lam)
+        ### PARAMETERS: indel rate
+        # first, check if "indel_rate" is provided, meaning you're 
+        #   tying weights
+        if 'indel_rate' in provided_args:
+            lam = jnp.array(argparse_obj.indel_rate)
+            mu = jnp.array(argparse_obj.indel_rate)
         
-        # mu
-        if 'mu' not in provided_args:
-            mu = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
+        # if this isn't provided, see if lam or mu are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            mu = jnp.array(argparse_obj.mu)
+            # lam; DEFAULT=evenly spaced values
+            if 'lam' not in provided_args:
+                lam = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
+            else:
+                lam = jnp.array(argparse_obj.lam)
             
-        # x
-        if 'x' not in provided_args:
-            x = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
-        else:
-            x = jnp.array(argparse_obj.x)
+            # mu; DEFAULT=evenly spaced values
+            if 'mu' not in provided_args:
+                mu = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
+            else:
+                mu = jnp.array(argparse_obj.mu)
         
-        # y
-        if 'y' not in provided_args:
-            y = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
-        else:
-            y = jnp.array(argparse_obj.y)
         
+        ### PARAMETERS: extension probability
+        # first, check if "extension_prob" is provided, meaning you're 
+        #   tying weights
+        if 'extension_prob' in provided_args:
+            x = argparse_obj.extension_prob
+            y = argparse_obj.extension_prob
+        
+        # if this isn't provided, see if x or y are provided; check these
+        # seperately, in the weird case you may provide one but not the other
+        else:
+            # x; DEFAULT=evenly spaced values
+            if 'x' not in provided_args:
+                x = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
+            else:
+                x = jnp.array(argparse_obj.x)
+            
+            # y; DEFAULT=evenly spaced values
+            if 'y' not in provided_args:
+                y = jnp.linspace(0.1, 0.9, argparse_obj.k_indel)
+            else:
+                y = jnp.array(argparse_obj.y)
+                
+                
         ### keep lambda and x
         # transform to (-inf, inf) domain; also add extra k_indel dimension
         lam_transf = jnp.sqrt(lam)
@@ -469,12 +504,6 @@ class GGI_mixture(GGI_single):
             mu = jnp.square(mu_transf)
             y = jnp.exp(-jnp.square(y_transf))
             
-            # also turn them into regular integers, for writing JSON
-            lam = np.array(lam).tolist()
-            mu = np.array(mu).tolist()
-            x = np.array(x).tolist()
-            y = np.array(y).tolist()
-            
             # add to output dictionary
             out_dict['lam'] = lam
             out_dict['mu'] = mu
@@ -485,8 +514,8 @@ class GGI_mixture(GGI_single):
             ### mu takes on value of lambda, y takes on value of x
             # combine lambda and mu under label "indel rate"
             # combine x and y under label "extension prob"
-            indel_rate = np.array(lam).tolist()
-            extension_prob = np.array(x).tolist()
+            indel_rate = np.array(lam)
+            extension_prob = np.array(x)
             
             # add to output dictionary
             out_dict['indel_rate'] = indel_rate
@@ -494,7 +523,7 @@ class GGI_mixture(GGI_single):
         
         
         ### add indel_mix_probs to the output dictionary too
-        out_dict['indel_mix_probs'] = np.array(indel_mix_probs).tolist()
+        out_dict['indel_mix_probs'] = np.array(indel_mix_probs)
         
         return out_dict
 
@@ -523,12 +552,19 @@ class TKF91_single(GGI_single):
         """
         provided_args = dir(argparse_obj)
         
-        # initialize with default values, if needed
-        if 'lam' not in provided_args:
-            lam = 0.5
-        else:
-            lam = argparse_obj.lam
+        ### PARAMETERS: indel rate
+        # first, check if "indel_rate" or "lam" are provided
+        if 'indel_rate' in provided_args:
+            lam = argparse_obj.indel_rate
         
+        elif 'lam' in provided_args:
+            lam = argparse_obj.lam
+            
+        # otherwise, default to 0.5
+        else:
+            lam = 0.5
+            
+            
         if 'offset' not in provided_args:
             offset = 0.0001
         else:
@@ -610,12 +646,12 @@ class TKF91_single(GGI_single):
             offset = jnp.square(offset_transf)
             mu = lam + offset + 0.003
             
-            out_dict = {'lam': lam.item(),
-                        'mu': mu.item()}
+            out_dict = {'lam': lam,
+                        'mu': mu}
         
         else:
-            indel_rate = lam.item()
-            out_dict = {'indel_rate': lam.item()}
+            indel_rate = lam
+            out_dict = {'indel_rate': lam}
         return out_dict
     
     
@@ -664,30 +700,51 @@ class TKF92_single(TKF91_single):
         """
         provided_args = dir(argparse_obj)
         
-        ### initialize with default values, if needed
-        # lambda
-        if 'lam' not in provided_args:
-            lam = 0.5
-        else:
-            lam = argparse_obj.lam
         
-        # mu
-        if 'offset' not in provided_args:
-            offset = 0.0001
-        else:
-            offset = argparse_obj.offset
+        ### PARAMETERS: indel rate
+        # first, check if "indel_rate" is provided, meaning you're 
+        #   tying weights
+        if 'indel_rate' in provided_args:
+            lam = argparse_obj.indel_rate
+            mu = argparse_obj.indel_rate
         
-        # x
-        if 'x' not in provided_args:
-            x = 0.5
+        # if this isn't provided, see if lam or offset are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            x = argparse_obj.x
+            # lam; DEFAULT=0.5
+            if 'lam' in provided_args:
+                lam = argparse_obj.lam
+            else:
+                lam = 0.5
+            
+            # offset (for mu); DEFAULT=0.0001
+            if 'offset' in provided_args:
+                offset = argparse_obj.offset
+            else:
+                offset = 0.0001
         
-        # y
-        if 'y' not in provided_args:
-            y = 0.5
+        
+        ### PARAMETERS: extension probability
+        # first, check if "extension_prob" is provided, meaning you're 
+        #   tying weights
+        if 'extension_prob' in provided_args:
+            x = argparse_obj.extension_prob
+            y = argparse_obj.extension_prob
+        
+        # if this isn't provided, see if x or y are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            y = argparse_obj.y
+            # x; DEFAULT=0.5
+            if 'x' in provided_args:
+                x = argparse_obj.x
+            else:
+                x = 0.5
+            
+            # y; DEFAULT=0.5
+            if 'y' in provided_args:
+                y = argparse_obj.y
+            else:
+                y = 0.5
         
         
         ### keep lambda and x
@@ -792,12 +849,6 @@ class TKF92_single(TKF91_single):
             mu = lam + offset + 0.003
             y = jnp.exp(-jnp.square(y_transf))
             
-            # also turn them into regular integers, for writing JSON
-            lam = lam.item()
-            mu = mu.item()
-            x = x.item()
-            y = y.item()
-            
             # add to output dictionary
             out_dict['lam'] = lam
             out_dict['mu'] = mu
@@ -808,8 +859,8 @@ class TKF92_single(TKF91_single):
             ### mu takes on value of lambda, y takes on value of x
             # combine lambda and mu under label "indel rate"
             # combine x and y under label "extension prob"
-            indel_rate = lam.item()
-            extension_prob = x.item()
+            indel_rate = lam
+            extension_prob = x
             
             # add to output dictionary
             out_dict['indel_rate'] = indel_rate
@@ -867,30 +918,50 @@ class otherIndel_single:
         """
         provided_args = dir(argparse_obj)
         
-        ### PARAMETERS: ggi params
-        # lambda
-        if 'lam' not in provided_args:
-            lam = 0.5
-        else:
-            lam = argparse_obj.lam
+        ### PARAMETERS: indel rate
+        # first, check if "indel_rate" is provided, meaning you're 
+        #   tying weights
+        if 'indel_rate' in provided_args:
+            lam = argparse_obj.indel_rate
+            mu = argparse_obj.indel_rate
         
-        # mu
-        if 'mu' not in provided_args:
-            mu = 0.5
+        # if this isn't provided, see if lam or mu are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            mu = argparse_obj.mu
+            # lam; DEFAULT=0.5
+            if 'lam' in provided_args:
+                lam = argparse_obj.lam
+            else:
+                lam = 0.5
             
-        # x
-        if 'x' not in provided_args:
-            x = 0.5
-        else:
-            x = argparse_obj.x
+            # mu; DEFAULT=0.5
+            if 'mu' in provided_args:
+                mu = argparse_obj.mu
+            else:
+                mu = 0.5
         
-        # y
-        if 'y' not in provided_args:
-            y = 0.5
+        
+        ### PARAMETERS: extension probability
+        # first, check if "extension_prob" is provided, meaning you're 
+        #   tying weights
+        if 'extension_prob' in provided_args:
+            x = argparse_obj.extension_prob
+            y = argparse_obj.extension_prob
+        
+        # if this isn't provided, see if x or y are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            y = argparse_obj.y
+            # x; DEFAULT=0.5
+            if 'x' in provided_args:
+                x = argparse_obj.x
+            else:
+                x = 0.5
+            
+            # y; DEFAULT=0.5
+            if 'y' in provided_args:
+                y = argparse_obj.y
+            else:
+                y = 0.5
         
         ### keep lambda and x
         # transform to (-inf, inf) domain; also add extra k_indel dimension
@@ -988,12 +1059,6 @@ class otherIndel_single:
             mu = jnp.square(mu_transf)
             y = jnp.exp(-jnp.square(y_transf))
             
-            # also turn them into regular integers, for writing JSON
-            lam = lam.item()
-            mu = mu.item()
-            x = x.item()
-            y = y.item()
-            
             # add to output dictionary
             out_dict['lam'] = lam
             out_dict['mu'] = mu
@@ -1004,8 +1069,8 @@ class otherIndel_single:
             ### mu takes on value of lambda, y takes on value of x
             # combine lambda and mu under label "indel rate"
             # combine x and y under label "extension prob"
-            indel_rate = lam.item()
-            extension_prob = x.item()
+            indel_rate = lam
+            extension_prob = x
             
             # add to output dictionary
             out_dict['indel_rate'] = indel_rate

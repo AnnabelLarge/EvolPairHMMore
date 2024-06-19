@@ -83,7 +83,7 @@ class equl_base:
         """
         # equilibrium distribution of amino acids, probably provided by 
         # the dataloader? make sure to give it an extra k_equl dimension
-        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_fromData'], -1)
+        equl_vec = jnp.expand_dims(hparams_dict['equl_vecs_from_train_data'], -1)
         equl_vec_noZeros = jnp.where(equl_vec!=0, equl_vec, 1)
         logprob_equl = jnp.log(equl_vec_noZeros)
         

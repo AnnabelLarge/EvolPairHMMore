@@ -77,7 +77,7 @@ def logsumexp_withZeros(x, axis):
 ### MAIN FUNCTIONS   ##########################################################
 ###############################################################################
 def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-             training_rngkey, loss_type):
+             training_rngkey, loss_type, DEBUG_FLAG=False):
     """
     Jit-able function to find log-likelihood of both substitutions and indels, 
       and collect gradients
@@ -94,6 +94,8 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > training_rngkey: training rng key to add to hyperparameters 
           dictionary (may or may not be used)
         > loss_type: either "conditional" or "joint"
+        > DEBUG_FLAG: whether or not to output intermediate values; probably 
+          don't do this during training loop
     
     outputs:
         > loss: negative mean log likelihood
@@ -184,8 +186,15 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
             marg_const_at_t = jnp.log(t) - ( t / (r-1) ) 
             
             
-            return (logP_counts_sub_at_t, logP_counts_trans_at_t,
-                    marg_const_at_t)
+            if not DEBUG_FLAG:
+                return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                        marg_const_at_t)
+            
+            else:
+                return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                        marg_const_at_t, logprob_substitution_at_t, 
+                        logprob_transition_at_t)
+            
         
         ### 1.2.3: vmap over the time array; return log probabilities 
         ###        PER TIME POINT and PER MIXTURE MODEL
@@ -200,6 +209,15 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         # (time,)
         marginalization_consts = out[2]
+        
+        if DEBUG_FLAG:
+            logprob_subst_mat = out[3]
+            logprob_trans_mat = out[4]
+            
+            intermediate_values = {'logprob_equl_vec':logprob_equl,
+                                   'logprob_subst_mat': logprob_subst_mat,
+                                   'logprob_trans_mat': logprob_trans_mat,
+                                   'marginalization_consts':marginalization_consts}
         
         
         ##################################
@@ -220,6 +238,12 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         subst_mix_logprobs = log_softmax(subst_mix_logits)
         equl_mix_logprobs = log_softmax(equl_mix_logits)
         indel_mix_logprobs = log_softmax(indel_mix_logits)
+        
+        if DEBUG_FLAG:
+            to_add = {'subst_mix_logprobs':subst_mix_logprobs,
+                      'equl_mix_logprobs':equl_mix_logprobs,
+                      'indel_mix_logprobs':indel_mix_logprobs}
+            intermediate_values = {**intermediate_values, **to_add}
         
         
         ### 1.3.2: for substitution model, take care of substitution mixtures 
@@ -277,32 +301,43 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                                   jnp.expand_dims(marginalization_consts, 1))
         
         ### 1.4.3: logsumexp across time dimension (dim0)
-        logP = logsumexp_withZeros(logP_perTime_withConst,
+        # (batch, )
+        logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                    axis=0)
 
         # output sum to get larger average across all batches
         # (not just this particular batch)
-        sum_logP = jnp.sum(logP)
+        sum_logP = jnp.sum(logP_perSamp)
         
         ### 1.4.4: final loss is -mean(logP) of this
-        loss = -jnp.mean(logP)
+        loss = -jnp.mean(logP_perSamp)
         
-        return loss, sum_logP
+        if not DEBUG_FLAG:
+            return loss, {'logP_perSamp': logP_perSamp,
+                          'sum_logP': sum_logP}
+        
+        else:
+            to_add = {'logP_perSamp': logP_perSamp,
+                      'sum_logP': sum_logP}
+            intermediate_values = {**intermediate_values, **to_add}
+            return loss, intermediate_values
     
     
     ### set up the grad functions, based on above apply function
     ggi_grad_fn = jax.value_and_grad(apply_model, has_aux=True)
     
-    # return loss and gradients
+    # return aux and gradients (gradient is really the only output 
+    #   that matters in the training loop)
     out_tup, all_grads = ggi_grad_fn(params_dict)
-    loss, sum_logP = out_tup
+    loss, aux_dict = out_tup
+    aux_dict['loss'] = loss
     
-    return loss, sum_logP, all_grads
+    return aux_dict, all_grads
     
 
 
 def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-            eval_rngkey, loss_type):
+            eval_rngkey, loss_type, DEBUG_FLAG=False):
     """
     Jit-able function to find log-likelihood of both substitutions and indels
     
@@ -348,8 +383,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ###        depend on time
     equl_vecs, logprob_equl = equl_model.equlVec_logprobs(params_dict,
                                                           hparams_dict)
-    
-    # overwrite equl_vecs entry in the hparams dictionary
+    # use equl_vecs and logprob_equl from TRAINING DATA 
     hparams_dict['equl_vecs'] = equl_vecs
     hparams_dict['logP_equl'] = logprob_equl
     
@@ -405,8 +439,15 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         marg_const_at_t = jnp.log(t) - ( t / (r-1) ) 
         
         
-        return (logP_counts_sub_at_t, logP_counts_trans_at_t,
-                marg_const_at_t)
+        if not DEBUG_FLAG:
+            return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                    marg_const_at_t)
+        
+        else:
+            return (logP_counts_sub_at_t, logP_counts_trans_at_t,
+                    marg_const_at_t, logprob_substitution_at_t, 
+                    logprob_transition_at_t)
+            
     
     ### 1.2.3: vmap over the time array; return log probabilities 
     ###        PER TIME POINT and PER MIXTURE MODEL
@@ -421,6 +462,16 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     # (time,)
     marginalization_consts = out[2]
+    
+    if DEBUG_FLAG:
+        logprob_subst_mat = out[3]
+        logprob_trans_mat = out[4]
+        
+        intermediate_values = {'logprob_equl_vec':logprob_equl,
+                               'logprob_subst_mat': logprob_subst_mat,
+                               'logprob_trans_mat': logprob_trans_mat,
+                               'marginalization_consts':marginalization_consts}
+    
     
     
     ##################################
@@ -441,6 +492,12 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     subst_mix_logprobs = log_softmax(subst_mix_logits)
     equl_mix_logprobs = log_softmax(equl_mix_logits)
     indel_mix_logprobs = log_softmax(indel_mix_logits)
+    
+    if DEBUG_FLAG:
+        to_add = {'subst_mix_logprobs':subst_mix_logprobs,
+                  'equl_mix_logprobs':equl_mix_logprobs,
+                  'indel_mix_logprobs':indel_mix_logprobs}
+        intermediate_values = {**intermediate_values, **to_add}
     
     
     ### 1.3.2: for substitution model, take care of substitution mixtures 
@@ -496,6 +553,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
                               jnp.expand_dims(marginalization_consts, 1))
     
     ### 1.4.3: logsumexp across time dimension (dim0)
+    # (batch, )
     logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                        axis=0)
 
@@ -505,6 +563,15 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     ### 1.4.4: final loss is -mean(logP_perSamp) of this
     loss = -jnp.mean(logP_perSamp)
     
+    if not DEBUG_FLAG:
+        return ({'logP_perSamp': logP_perSamp,
+                 'sum_logP': sum_logP,
+                 'loss': loss}, 
+                sum_logP)
     
-    return (loss, sum_logP, logP_perSamp)
+    else:
+        to_add = {'logP_perSamp': logP_perSamp,
+                  'loss': loss}
+        intermediate_values = {**intermediate_values, **to_add}
+        return (intermediate_values, sum_logP)
 

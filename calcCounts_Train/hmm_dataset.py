@@ -84,7 +84,7 @@ class HMMDset(Dataset):
         del data_mat_lst
         
         # little bit of post-processing after concatenating all dataframes
-        cols_to_keep = ['pairID','ancestor','descendant','pfam']
+        cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
         self.names_df = pd.concat(metadata_list, axis=0)[cols_to_keep]
         self.names_df = self.names_df.reset_index(drop=True)
         del cols_to_keep, metadata_list
@@ -108,6 +108,10 @@ class HMMDset(Dataset):
     def retrieve_sample_names(self, idxes):
         # used the list of sample indices to query the original names_df
         return self.names_df.iloc[idxes]
+    
+    def retrieve_desc_lens(self, idxes):
+        # used to return the length of the descendant sequence
+        return self.names_df.iloc[idxes]['desc_seq_len'].to_numpy()
     
     def write_split_indices(self, idxes):
         # this is a method for early loading, but not lazy loading

@@ -60,6 +60,7 @@ todo:
 import jax
 from jax import numpy as jnp
 from jax.nn import softmax
+from jax.scipy.linalg import expm
 from tensorflow_probability.substrates import jax as tfp
 import copy
 import numpy as np
@@ -123,9 +124,16 @@ class subst_base:
         if self.norm:
             R_mat = self.norm_rate_matrix(R_mat, equl_vecs)
         
-        # multiply by time
-        # log(exp(Rt)); (alph, alph, k_subst=1, k_equl)
-        cond_logprob_substitution_at_t = R_mat * t
+        # logP = log(expm(Rt))
+        # R is (alph, alph, k_subst=1, k_equl), but expm needs square matrices
+        for_mat_expm = R_mat * t
+        for_mat_expm_reshaped = jnp.reshape( for_mat_expm, 
+                                            (for_mat_expm.shape[0],
+                                             for_mat_expm.shape[1],
+                                             for_mat_expm.shape[2]*for_mat_expm.shape[3]) )
+        exponentiated_raw = jax.vmap(expm, in_axes=2, out_axes=2)(for_mat_expm_reshaped)
+        for_log = jnp.reshape(exponentiated_raw, for_mat_expm.shape)
+        cond_logprob_substitution_at_t = jnp.log(for_log)
         
         return cond_logprob_substitution_at_t
     
