@@ -97,4 +97,5 @@ Both eval functions will use these inputs, or some subset of these inputs; see `
 - combine all training functions under one general, flexible run function
 - combine all eval functions under one general, flexible run function
 - remove the option to calculate counts on the fly; I don't ever use it
+- better description of models + required json arguments
 
