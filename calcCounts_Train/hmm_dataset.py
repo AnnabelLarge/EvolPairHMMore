@@ -80,7 +80,7 @@ class HMMDset(Dataset):
             del split
         
         # concatenate all data matrices
-        self.data_mat = np.concatenate(data_mat_lst, axis=1)
+        self.data_mat = np.concatenate(data_mat_lst, axis=0)
         del data_mat_lst
         
         # little bit of post-processing after concatenating all dataframes
@@ -94,7 +94,7 @@ class HMMDset(Dataset):
         
         
     def __len__(self):
-        return self.data_mat.shape[1]
+        return self.data_mat.shape[0]
 
     def __getitem__(self, idx):
         sample_seqs = self.data_mat[idx, :, :]
