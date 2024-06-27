@@ -47,7 +47,7 @@ def eval_pairhmm(args, dataloader_tup):
         os.mkdir(args.eval_wkdir)
         
     # locate everything needed to load a model; add to main argparse object
-    training_dir = f'{args.training_wkdir}/model_ckpts/{args.training_runname}'
+    training_dir = f'{args.training_wkdir}/model_ckpts/'
     
     with open(f'{training_dir}/forLoad_argparse.pkl','rb') as f:
         training_argparse_obj = pickle.load(f)
@@ -106,8 +106,8 @@ def eval_pairhmm(args, dataloader_tup):
     ###########################################################################
     print(f'1: setup')
     # output file for individual results per sample
-    output_persamp_file = f'{args.eval_wkdir}/{args.eval_runname}_LOGPROB-PER-SAMP.tsv'
-    output_ave_file = f'{args.eval_wkdir}/{args.eval_runname}_AVE-LOGPROB.tsv'
+    output_persamp_file = f'{args.eval_wkdir}/LOGPROB-PER-SAMP.tsv'
+    output_ave_file = f'{args.eval_wkdir}/AVE-LOGPROB.tsv'
     
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
@@ -115,16 +115,12 @@ def eval_pairhmm(args, dataloader_tup):
     
     # if debugging, set up an intermediates folder
     folder_path = f'{os.getcwd()}/{args.eval_wkdir}/HMM_INTERMEDIATES'
-    subfolder_path = f'{folder_path}/{args.eval_runname}'
     
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     
-    if not os.path.exists(subfolder_path):
-        os.mkdir(subfolder_path)
-    
     args.intermediates_folder = subfolder_path
-    del folder_path, subfolder_path
+    del folder_path
     
     
     ### use the helper function to import/initialize dataloaders
@@ -260,7 +256,7 @@ def eval_pairhmm(args, dataloader_tup):
     final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
     final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
     with open(output_ave_file, 'w') as g:
-        g.write(f'{args.eval_runname}\t')
+        g.write(f'{args.eval_wkdir}\t')
         g.write(f'{final_ave_test_loss}\t')
         g.write(f'{final_ave_test_loss_seqlen_normed}\n')
     

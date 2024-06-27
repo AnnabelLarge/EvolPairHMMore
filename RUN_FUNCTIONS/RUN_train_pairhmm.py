@@ -37,7 +37,7 @@ from utils.init_dataloaders import init_dataloaders
 
 
 
-def train_pairhmm(args, dataloader_tup):
+def train_pairhmm(args, dataloader_lst):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES    ########################
     ###########################################################################
@@ -118,16 +118,12 @@ def train_pairhmm(args, dataloader_tup):
     
     # if debugging, set up an intermediates folder
     folder_path = f'{os.getcwd()}/{args.training_wkdir}/HMM_INTERMEDIATES'
-    subfolder_path = f'{folder_path}/{args.runname}'
     
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     
-    if not os.path.exists(subfolder_path):
-        os.mkdir(subfolder_path)
-    
-    args.intermediates_folder = subfolder_path
-    del folder_path, subfolder_path
+    args.intermediates_folder = folder_path
+    del folder_path
     
     
     ### use the helper function to import/initialize dataloaders
@@ -501,7 +497,7 @@ def train_pairhmm(args, dataloader_tup):
     final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
     
     # save whole dataframe and remove from memory
-    final_loglikes_train_set.to_csv(f'{args.training_wkdir}/{args.runname}_train-set_loglikes.tsv', sep='\t')
+    final_loglikes_train_set.to_csv(f'{args.training_wkdir}/train-set_loglikes.tsv', sep='\t')
     del final_loglikes_train_set
     
     # update the logfile with final losses
@@ -566,7 +562,7 @@ def train_pairhmm(args, dataloader_tup):
     final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
     
     # save whole dataframe and remove from memory
-    final_loglikes_test_set.to_csv(f'{args.training_wkdir}/{args.runname}_test-set_loglikes.tsv', sep='\t')
+    final_loglikes_test_set.to_csv(f'{args.training_wkdir}/test-set_loglikes.tsv', sep='\t')
     del final_loglikes_test_set
     
     # update the logfile with final losses
@@ -620,7 +616,7 @@ if __name__ == '__main__':
     
     
     # load data
-    dataloader_tup = init_dataloaders(args)
+    dataloader_lst = init_dataloaders(args)
     
     # run training function
-    train_pairhmm(args, dataloader_tup)
+    train_pairhmm(args, dataloader_lst)

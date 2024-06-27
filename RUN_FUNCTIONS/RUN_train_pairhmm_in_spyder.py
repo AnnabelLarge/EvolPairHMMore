@@ -63,7 +63,6 @@ def generate_fake_model(args):
 class FakeArgparse:
     def __init__(self):
        	self.training_wkdir= "EXAMPLE_OUT"
-       	self.runname= "run1"
        	self.rng_seednum= 0
         self.debug=True
        

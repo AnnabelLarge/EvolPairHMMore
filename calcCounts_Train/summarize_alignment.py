@@ -27,7 +27,7 @@ def count_substitutions(one_pair, match_pos_mask, alphabet_size=20):
     this will get vmapped over the batch dimension
     """
     # adjust input shape
-    match_pos_mask = jnp.expand_dims(match_pos_mask, 0)
+    match_pos_mask = jnp.expand_dims(match_pos_mask, 0).T
     
     # this gets vmapped down the sequence length
     def identify_sub_pairs(vec_at_pos, bool_at_pos):
@@ -44,7 +44,7 @@ def count_substitutions(one_pair, match_pos_mask, alphabet_size=20):
         # the position is NOT a match position
         masked_indicator_mat = (indicator_mat * bool_at_pos)
         return masked_indicator_mat
-    vmapped_identify_sub_pairs = jax.vmap(identify_sub_pairs, in_axes=1)
+    vmapped_identify_sub_pairs = jax.vmap(identify_sub_pairs, in_axes=(0,0))
     
     # apply fn; output is (seq_len, alphabet_size, alphabet_size)
     subCounts_persamp_persite = vmapped_identify_sub_pairs(one_pair, match_pos_mask)
@@ -62,7 +62,7 @@ def count_insertions(seqs, ins_pos_mask, alphabet_size=20):
     this can operate on the whole batch at once
     """
     ### what got inserted = what amino acid is in the descendant sequence at insertion site
-    all_inserts = seqs[:, 1, :] * ins_pos_mask
+    all_inserts = seqs[:, :, 1] * ins_pos_mask
     
     ### count the number of valid tokens
     # this gets vmapped over the valid alphabet
@@ -83,7 +83,7 @@ def count_deletions(seqs, del_pos_mask, alphabet_size=20):
     this can operate on the whole batch at once
     """
     ### what got inserted = what amino acid is in the ancestor sequence at deletion site
-    all_dels = seqs[:, 0, :] * del_pos_mask
+    all_dels = seqs[:, :, 0] * del_pos_mask
     
     ### count the number of valid tokens
     # this gets vmapped over the valid alphabet
@@ -141,9 +141,9 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
          2: <eos> (not included in pairHMM data, but still reserved token)
         63: default gap char (but could be changed; just needs to be >=23)
     
-    sequence tensor is of size (batch_size, 2, max_seq_len), where-
-        dim1=0: ancestor sequence, aligned (i.e. sequence contains gaps)
-        dim1=1: descendant sequence, aligned (i.e. sequence contains gaps)
+    sequence tensor is of size (batch_size, max_seq_len, 2), where-
+        dim2=0: ancestor sequence, aligned (i.e. sequence contains gaps)
+        dim2=1: descendant sequence, aligned (i.e. sequence contains gaps)
     
     the second element of batch is a vector of size (batch_size,) 
         that has the length of the alignments
@@ -169,7 +169,7 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
     del batch
     
     # clip to max seq len
-    seqs = seqs[:, :, :max_seq_len]
+    seqs = seqs[:, :max_seq_len, :]
     
     
     #######################################
@@ -181,13 +181,13 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
     
     ### find matches, inserts, and deletions
     # matches found using non_gaps vector
-    match_pos = jnp.where(jnp.sum(non_gaps, axis=1) == 2, 1, 0)
+    match_pos = jnp.where(jnp.sum(non_gaps, axis=2) == 2, 1, 0)
     
     # inserts mean ancestor char == gap_tok
-    ins_pos = jnp.where(gaps[:,0,:] == gap_tok, 1, 0)
+    ins_pos = jnp.where(gaps[:,:,0] == gap_tok, 1, 0)
     
     # deletions means descendant char == gap_tok
-    del_pos = jnp.where(gaps[:,1,:] == gap_tok, 1, 0)
+    del_pos = jnp.where(gaps[:,:,1] == gap_tok, 1, 0)
     
     # combine all into one vec for counting transitions later
     # M = 1, I = 2, D = 3; padding is 0

@@ -13,9 +13,9 @@ Custom pytorch dataset object for giving pfam data to PAIR HMM MODELS (like
 
 outputs:
 ========
-1. the pair alignments, categorically encoded (batch_size, 2, max_len)
-   > dim1=0:ancestor
-   > dim1=1: descendant
+1. the pair alignments, categorically encoded (batch_size, max_len, 2)
+   > dim2=0:ancestor
+   > dim2=1: descendant
 
 2. the length of alignments (batch_size, )
 
@@ -25,7 +25,7 @@ outputs:
 
 Data to be read:
 =================
-1. Numpy matrix of sequences: a tensor of size (num_pairs, 2, max_len), where 
+1. Numpy matrix of sequences: a tensor of size (num_pairs, max_len, 2), where 
    dim1 corresponds to-
     - (dim1=0): aligned ancestor
     - (dim1=1): aligned descendant
@@ -90,7 +90,7 @@ class HMMDset(Dataset):
         del cols_to_keep, metadata_list
         
         # generate the lengths matrix
-        self.lengths_vec = (self.data_mat != 0).sum(axis=2).T[:, 0]
+        self.lengths_vec = np.sum( (self.data_mat != 0), axis=1)[:,0]
         
         
     def __len__(self):
@@ -103,7 +103,7 @@ class HMMDset(Dataset):
         return (sample_seqs, sample_align_len, sample_idx)
     
     def max_seqlen(self):
-        return self.data_mat.shape[2]
+        return self.data_mat.shape[1]
     
     def retrieve_sample_names(self, idxes):
         # used the list of sample indices to query the original names_df
@@ -131,7 +131,7 @@ if __name__ == '__main__':
     #   the same file as FiveSamp_AAcounts_subsOnly
     subsOnly = True
     data_dir = 'DEV-DATA_pair_alignments'
-    split_prefixes = ['FiveSamp']
+    split_prefixes = ['fiftySamps']
     
     ### initialize the pytorch dataset object
     dset = HMMDset(data_dir = data_dir,
