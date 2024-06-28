@@ -323,7 +323,8 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         
         else:
             to_add = {'logP_perSamp': logP_perSamp,
-                      'sum_logP': sum_logP}
+                      'sum_logP': sum_logP,
+                      'logP_perTime_withConst': logP_perTime_withConst}
             intermediate_values = {**intermediate_values, **to_add}
             return loss, intermediate_values
     
@@ -467,6 +468,11 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
     # (time,)
     marginalization_consts = out[2]
+    
+    # if only one timepoint, don't add any marginalization constants
+    if marginalization_consts.shape[0] == 1:
+        marginalization_consts = 0 * marginalization_consts
+        
     
     if DEBUG_FLAG:
         logprob_subst_mat = out[3]

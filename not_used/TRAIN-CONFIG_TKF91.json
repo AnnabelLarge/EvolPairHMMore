@@ -1,0 +1,36 @@
+{
+	"training_wkdir": "TKF91_train0134_test2",
+	"rng_seednum": 214,
+	"debug": true,
+
+	"alphabet_size": 20,
+	"have_precalculated_counts": true,
+	"loadtype": "eager",
+	"data_dir": "DEV-DATA_precalculated_counts",
+	"train_dset_splits": ["KPROT_OOD_VALID"],
+	"test_dset_splits": ["KPROT_OOD_VALID"],
+	"batch_size": 50000,
+
+	"num_epochs": 5,
+	"learning_rate": 0.005,
+	"patience": 10,
+	"early_stop_rtol": 1e-5,
+	"loss_type": "conditional",
+
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 65,
+
+	"subst_model_type": "subst_base",
+	"subsOnly": false,
+	"norm": true,
+	"exch_files": "LG08_exchangeability_r.npy",
+	"gap_tok": 43,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": "TKF91_single",
+	"tie_params": true,
+	"lam": 0.5
+
+}

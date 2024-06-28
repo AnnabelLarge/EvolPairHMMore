@@ -21,6 +21,7 @@ import numpy as np
 import copy
 from tqdm import tqdm
 import json
+from functools import partial
 
 import jax
 from jax import numpy as jnp
@@ -45,7 +46,10 @@ def train_pairhmm(args, dataloader_lst):
     
     # if not provided, assume not in debug mode
     if 'debug' not in vars(args):
-        args.debug = False
+        DEBUG_FLAG = False
+    
+    else:
+        DEBUG_FLAG = args.debug
     
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
@@ -100,9 +104,6 @@ def train_pairhmm(args, dataloader_lst):
     # setup folders; manually create model checkpoint directory (i.e. what 
     #   orbax would normally do for you)
     setup_training_dir(args)
-    if not os.path.exists(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'):
-        os.mkdir(f'{os.getcwd()}/{args.training_wkdir}/model_ckpts')
-    os.mkdir(args.model_ckpts_dir)
     
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
@@ -209,15 +210,31 @@ def train_pairhmm(args, dataloader_lst):
     
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
-    jitted_train_fn = jax.jit(train_fn, static_argnames=['loss_type', 'DEBUG_FLAG'])
-    jitted_eval_fn = jax.jit(eval_fn, static_argnames=['loss_type', 'DEBUG_FLAG'])
+    # for training function, automatically set debug=False
+    parted_train_fn = partial(train_fn,
+                              t_arr = t_array,
+                              loss_type = args.loss_type)
+                              # DEBUG_FLAG = False)
+    jitted_train_fn = jax.jit(parted_train_fn, 
+                             static_argnames=['loss_type',
+                                              'DEBUG_FLAG'])
+    
+    parted_eval_fn = partial(eval_fn,
+                             t_arr = t_array,
+                             loss_type = args.loss_type)
+    jitted_eval_fn = jax.jit(parted_eval_fn, 
+                             static_argnames=['loss_type',
+                                              'DEBUG_FLAG'])
+    
     if not args.have_precalculated_counts:
-        summarize_alignment_jitted = jax.jit(summarize_alignment, 
-                                             static_argnames=['max_seq_len',
-                                                              'alphabet_size',
-                                                              'gap_tok',
-                                                              'subsOnly'])
+        parted_summary_fn = partial(summarize_alignment,
+                                    alphabet_size = hparams['alphabet_size'],
+                                    gap_tok = hparams['gap_tok'],
+                                    subsOnly = args.subsOnly)
         
+        summarize_alignment_jitted = jax.jit(parted_summary_fn, 
+                                             static_argnames=['max_seq_len'])
+    
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 9999
     early_stopping_counter = 0
@@ -247,10 +264,7 @@ def train_pairhmm(args, dataloader_lst):
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = training_global_max_seqlen)
                 allCounts = summarize_alignment_jitted(batch, 
-                                                max_seq_len = batch_max_seqlen, 
-                                                alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'],
-                                                subsOnly = args.subsOnly)
+                                                max_seq_len = batch_max_seqlen)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -259,15 +273,27 @@ def train_pairhmm(args, dataloader_lst):
             
             # take a step using minibatch gradient descent
             out = jitted_train_fn(all_counts = allCounts, 
-                                  t_arr = t_array, 
                                   pairHMM = pairHMM, 
                                   params_dict = params, 
                                   hparams_dict = hparams,
                                   training_rngkey = rngkey_for_training,
-                                  loss_type = args.loss_type)
+                                  DEBUG_FLAG = True)
             aux_dict, param_grads = out
             del out
-
+            
+            
+            ### DEBUG: output the transition matrix, parameters, and time 
+            ### array; make sure code is calculating as Ian's code would, 
+            ### for given timepoint
+            with open(f'{args.training_wkdir}_INITIAL_TRANSITION_MAT.pkl','wb') as g:
+                pickle.dump({'pred_logprob_trans': aux_dict['logprob_trans_mat'],
+                             't_array': t_array,
+                             'params': pairHMM[-1].undo_param_transform(params)}, g)
+                
+                raise RuntimeError('Stop after one pass; check intermediates')
+            
+            
+            
             # update the parameters dictionary with optax
             updates, opt_state = tx.update(param_grads, opt_state)
             params = optax.apply_updates(params, updates)
@@ -308,10 +334,7 @@ def train_pairhmm(args, dataloader_lst):
                 batch_max_seqlen = clip_batch_inputs(batch, 
                                                      global_max_seqlen = test_global_max_seqlen)
                 allCounts = summarize_alignment_jitted(batch, 
-                                                max_seq_len = batch_max_seqlen, 
-                                                alphabet_size=hparams['alphabet_size'], 
-                                                gap_tok=hparams['gap_tok'],
-                                                subsOnly = args.subsOnly)
+                                                max_seq_len = batch_max_seqlen)
                 del batch_max_seqlen
             
             # if you have these counts, just unpack the batch
@@ -320,13 +343,11 @@ def train_pairhmm(args, dataloader_lst):
             
             # evaluate batch loss
             out = jitted_eval_fn(all_counts = allCounts, 
-                                 t_arr = t_array, 
                                  pairHMM = pairHMM, 
                                  params_dict = params, 
                                  hparams_dict = hparams,
                                  eval_rngkey = rngkey_for_eval,
-                                 loss_type = args.loss_type,
-                                 DEBUG_FLAG = args.debug)
+                                 DEBUG_FLAG = DEBUG_FLAG)
             
             aux_dict, batch_test_sum_logP = out
             del out
@@ -360,7 +381,7 @@ def train_pairhmm(args, dataloader_lst):
             
             ### if in debug mode, output the aux dict from the LAST batch of 
             ### the eval set every time you hit a "best loss"
-            if args.debug:
+            if DEBUG_FLAG:
                 to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
                 aux_dict = {**to_add, **aux_dict}
                 
@@ -461,10 +482,7 @@ def train_pairhmm(args, dataloader_lst):
             batch_max_seqlen = clip_batch_inputs(batch, 
                                                  global_max_seqlen = train_global_max_seqlen)
             allCounts = summarize_alignment_jitted(batch, 
-                                            max_seq_len = batch_max_seqlen, 
-                                            alphabet_size=hparams['alphabet_size'], 
-                                            gap_tok=hparams['gap_tok'],
-                                            subsOnly = args.subsOnly)
+                                            max_seq_len = batch_max_seqlen)
             del batch_max_seqlen
         
         # if you have these counts, just unpack the batch
@@ -473,12 +491,11 @@ def train_pairhmm(args, dataloader_lst):
         
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
-                             t_arr = t_array, 
                              pairHMM = pairHMM, 
                              params_dict = best_params, 
                              hparams_dict = hparams,
                              eval_rngkey = rng_for_final_train,
-                             loss_type = args.loss_type)
+                             DEBUG_FLAG = False)
         
         aux_dict, _ = out
         del out
@@ -525,10 +542,7 @@ def train_pairhmm(args, dataloader_lst):
             batch_max_seqlen = clip_batch_inputs(batch, 
                                                  global_max_seqlen = test_global_max_seqlen)
             allCounts = summarize_alignment_jitted(batch, 
-                                            max_seq_len = batch_max_seqlen, 
-                                            alphabet_size=hparams['alphabet_size'], 
-                                            gap_tok=hparams['gap_tok'],
-                                            subsOnly = args.subsOnly)
+                                            max_seq_len = batch_max_seqlen)
             del batch_max_seqlen
         
         # if you have these counts, just unpack the batch
@@ -537,13 +551,11 @@ def train_pairhmm(args, dataloader_lst):
         
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
-                             t_arr = t_array, 
                              pairHMM = pairHMM, 
                              params_dict = best_params, 
                              hparams_dict = hparams,
                              eval_rngkey = rng_for_final_test,
-                             loss_type = args.loss_type,
-                             DEBUG_FLAG = args.debug)
+                             DEBUG_FLAG = DEBUG_FLAG)
         
         aux_dict, _ = out
         del out
@@ -571,7 +583,7 @@ def train_pairhmm(args, dataloader_lst):
         g.write(f'Test set average loglike (normed by desc seq len): {final_ave_test_loss_seqlen_normed}\n\n')
     
     # output the aux dict from the final batch, if debugging
-    if args.debug:
+    if DEBUG_FLAG:
         to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
         aux_dict = {**to_add, **aux_dict}
         
@@ -599,14 +611,16 @@ if __name__ == '__main__':
     
     
     # config files required to run
-    parser.add_argument('--config-file',
-                      type = str,
-                      required=True,
-                      help='Load configs from file in json format.')
+    # parser.add_argument('--config-file',
+    #                   type = str,
+    #                   required=True,
+    #                   help='Load configs from file in json format.')
     
    
     # parse the arguments
     args = parser.parse_args()
+    
+    args.config_file = 'TRAIN-CONFIG_TKF91.json'
     
     
     with open(args.config_file, 'r') as f:

@@ -48,9 +48,11 @@ if __name__ == '__main__':
     
     if init_args.task == 'train':
         fn = train_pairhmm
+        onlyTest = False
     
     elif init_args.task == 'eval':
         fn = eval_pairhmm
+        onlyTest = True
     
     else:
         print('PICK EITHER: train, eval')
@@ -68,7 +70,7 @@ if __name__ == '__main__':
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
         init_config_args = parser.parse_args(namespace=t_args)
-    data_tup = load_all_data(init_config_args)
+    data_tup = init_dataloaders(init_config_args, onlyTest=onlyTest)
     
     
     # iterate through all config files with this same data tuple

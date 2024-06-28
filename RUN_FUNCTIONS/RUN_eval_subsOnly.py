@@ -7,9 +7,8 @@ Created on Wed Jan 17 11:18:49 2024
 
 ABOUT:
 ======
-Load aligned pfams and model params, optionally calculate emission and transition 
-  counts from pair alignments. Possibility of single or mixture models
-  over substitutions, equilibrium distributions, and indel models
+Load aligned pfams and score with a substitution matrix using equilibrium
+  from TRAINING SPLIT ONLY
 
 """
 import os
@@ -20,6 +19,7 @@ import numpy as np
 import copy
 from tqdm import tqdm
 import json
+from functools import partial
 
 import jax
 from jax import numpy as jnp
@@ -36,35 +36,35 @@ from utils.init_dataloaders import init_dataloaders
 
 
 
-def eval_pairhmm(args, dataloader_tup):
+def eval_subsOnly(args, dataloader_lst):
     ###########################################################################
     ###  0: FOLDER SETUP, MODEL/PARAM/HPARAM IMPORTS    #######################
     ###########################################################################
     print('0: checking config, loading params')
     
+    # make sure config is set up correctly
+    assert args.subsOnly == True
+    
+    # overwrite some defaults
+    args.equl_model_type == "equl_base"
+    args.indel_model_type == "no_indel"
+    
     # create the eval working directory, if it doesn't exist
     if args.eval_wkdir not in os.listdir():
         os.mkdir(args.eval_wkdir)
         
-    # locate everything needed to load a model; add to main argparse object
-    training_dir = f'{args.training_wkdir}/model_ckpts/'
-    
-    with open(f'{training_dir}/forLoad_argparse.pkl','rb') as f:
-        training_argparse_obj = pickle.load(f)
-    
-    with open(f'{training_dir}/params_dict.pkl','rb') as f:
-        loaded_params = pickle.load(f)
-    
     # if not provided, assume not in debug mode
     if 'debug' not in vars(args):
-        args.debug = False
+        DEBUG_FLAG = False
+    else:
+        DEBUG_FLAG = args.debug
     
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
     assert args.loadtype == 'eager'
     
     # load models and possibly register as pytrees
-    out = model_import_register(training_argparse_obj)
+    out = model_import_register(args)
     subst_model, equl_model, indel_model, _ = out
     del out
     
@@ -109,33 +109,31 @@ def eval_pairhmm(args, dataloader_tup):
     output_persamp_file = f'{args.eval_wkdir}/LOGPROB-PER-SAMP.tsv'
     output_ave_file = f'{args.eval_wkdir}/AVE-LOGPROB.tsv'
     
-    # rng key
-    rngkey = jax.random.key(args.rng_seednum)
-    
-    
     # if debugging, set up an intermediates folder
     folder_path = f'{os.getcwd()}/{args.eval_wkdir}/HMM_INTERMEDIATES'
     
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
-    
-    args.intermediates_folder = subfolder_path
+    args.intermediates_folder = folder_path
     del folder_path
-    
+
+    #pretty sure this isn't ever used, but keep for compatibility I guess
+    rngkey = jax.random.key(args.rng_seednum)    
     
     ### use the helper function to import/initialize dataloaders
     # from "dataloader_lst = init_dataloaders(args)"
-    test_dset, test_dl = dataloader_lst
-    del dataloader_tup
+    training_dset, training_dl, test_dset, test_dl = dataloader_lst
+    del dataloader_lst
     
+    training_global_max_seqlen = training_dset.max_seqlen()
     test_global_max_seqlen = test_dset.max_seqlen()
     
     
     ### quantize time in geometric spacing, just like in cherryML
-    quantization_grid = range(-(training_argparse_obj.t_grid_num_steps-1), 
-                              training_argparse_obj.t_grid_num_steps, 
+    quantization_grid = range(-(args.t_grid_num_steps-1), 
+                              args.t_grid_num_steps, 
                               1)
-    t_array = jnp.array([(training_argparse_obj.t_grid_center * training_argparse_obj.t_grid_step**q_i) for q_i in quantization_grid])
+    t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
     
     
     ### column header for output eval depends on which probability is
@@ -153,38 +151,39 @@ def eval_pairhmm(args, dataloader_tup):
     ###########################################################################
     print('2: hyperparam init')
     ### initialize the equlibrium distribution(s)
-    _, equl_model_hparams = equl_model.initialize_params(argparse_obj=training_argparse_obj)
+    equl_model_params, equl_model_hparams = equl_model.initialize_params(argparse_obj=args)
     
     # if this is the base model, use the equilibrium distribution from 
     #   TRAINING data
-    if training_argparse_obj.equl_model_type == 'equl_base':
-        equl_model_hparams['equl_vecs_from_train_data'] = test_dset.retrieve_equil_dist()
+    if args.equl_model_type == 'equl_base':
+        equl_model_hparams['equl_vecs_from_train_data'] = training_dset.retrieve_equil_dist()
     
     # if you're not scoring emissions from indels at all, use this placeholder
-    elif training_argparse_obj.equl_model_type == 'no_equl':
-        equl_model_hparams['equl_vecs_from_train_data'] = jnp.zeros((training_argparse_obj.alphabet_size))
+    elif args.equl_model_type == 'no_equl':
+        equl_model_hparams['equl_vecs_from_train_data'] = jnp.zeros((args.alphabet_size))
     
     
     ### initialize the substitution model
-    _, subst_model_hparams = subst_model.initialize_params(argparse_obj=training_argparse_obj)
+    subst_model_params, subst_model_hparams = subst_model.initialize_params(argparse_obj=args)
     
     
     ### initialize the indel model
-    _, indel_model_hparams = indel_model.initialize_params(argparse_obj=training_argparse_obj)
+    indel_model_params, indel_model_hparams = indel_model.initialize_params(argparse_obj=args)
     
     
     ## combine all hyperparameters to be passed to eval function 
+    params = {**equl_model_params, **subst_model_params, **indel_model_params}
     hparams = {**equl_model_hparams, **subst_model_hparams, **indel_model_hparams}
     
     # if it hasn't already been specified in the JSON file, set the gap_tok
     #   to default value of 43; this is only used for calculating counts
-    if 'gap_tok' not in dir(training_argparse_obj):
+    if 'gap_tok' not in dir(args):
         hparams['gap_tok'] = 43
     else:
-        hparams['gap_tok'] = training_argparse_obj.gap_tok
+        hparams['gap_tok'] = args.gap_tok
     
     # add grid step to hparams dictionary; needed for marginaling over time
-    hparams['t_grid_step']= training_argparse_obj.t_grid_step
+    hparams['t_grid_step']= args.t_grid_step
     
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
@@ -212,6 +211,74 @@ def eval_pairhmm(args, dataloader_tup):
         
         summarize_alignment_jitted = jax.jit(parted_summary_fn, 
                                              static_argnames=['max_seq_len'])
+        
+        
+    ###########################################
+    ### loop through training dataloader and  #
+    ### score with best params                #
+    ###########################################    
+    # if this blows up the CPU, output in parts instead
+    final_loglikes_train_set = []
+       
+    for batch_idx, batch in enumerate(training_dl):
+        rng_for_final_train = jax.random.fold_in(rngkey, (10000 + batch_idx + len(training_dl)))
+        
+        # if you DON'T have precalculated counts matrices, will need to 
+        #   clip the batch inputs
+        if not args.have_precalculated_counts:
+            batch_max_seqlen = clip_batch_inputs(batch, 
+                                                 global_max_seqlen = train_global_max_seqlen)
+            allCounts = summarize_alignment_jitted(batch, 
+                                            max_seq_len = batch_max_seqlen)
+            del batch_max_seqlen
+        
+        # if you have these counts, just unpack the batch
+        elif args.have_precalculated_counts:
+            allCounts = (batch[0], batch[1], batch[2], batch[3])
+        
+        # evaluate batch loss
+        out = jitted_eval_fn(all_counts = allCounts, 
+                             pairHMM = pairHMM, 
+                             params_dict = params, 
+                             hparams_dict = hparams,
+                             eval_rngkey = rng_for_final_train)
+        
+        aux_dict, _ = out
+        del out
+        
+        # using batch_idx, generate the initial loss dataframe
+        batch_out_df = training_dset.retrieve_sample_names(batch[-1])
+        batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+                                                      batch_out_df['desc_seq_len'])
+        
+        final_loglikes_train_set.append(batch_out_df)
+        
+        
+    # concatenate values
+    final_loglikes_train_set = pd.concat(final_loglikes_train_set)
+    final_ave_train_loss = final_loglikes_train_set['logP_perSamp'].mean()
+    final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
+    with open(output_ave_file, 'w') as g:
+        g.write(f'{args.eval_wkdir}\t')
+        g.write(f'{final_ave_train_loss}\t')
+        g.write(f'{final_ave_train_loss_seqlen_normed}\t')
+    
+    # save whole dataframe and remove from memory
+    final_loglikes_train_set.to_csv(output_persamp_file, sep='\t')
+    del final_loglikes_train_set
+    
+    # output the aux dict from the final batch, if debugging
+    if DEBUG_FLAG:
+        to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
+        aux_dict = {**to_add, **aux_dict}
+        
+        with open(f'{args.intermediates_folder}/TRAIN-SPLIT_intermediates.pkl', 'wb') as g:
+            pickle.dump(aux_dict, g)
+    
+    # clean up variables
+    del training_dl, training_dset, batch, batch_idx, rng_for_final_train
+
 
     ###########################################
     ### loop through test dataloader and      #
@@ -239,7 +306,7 @@ def eval_pairhmm(args, dataloader_tup):
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
                              pairHMM = pairHMM, 
-                             params_dict = loaded_params, 
+                             params_dict = params, 
                              hparams_dict = hparams,
                              eval_rngkey = rng_for_final_test)
         
@@ -259,7 +326,6 @@ def eval_pairhmm(args, dataloader_tup):
     final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
     final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
     with open(output_ave_file, 'w') as g:
-        g.write(f'{args.eval_wkdir}\t')
         g.write(f'{final_ave_test_loss}\t')
         g.write(f'{final_ave_test_loss_seqlen_normed}\n')
     
@@ -272,7 +338,7 @@ def eval_pairhmm(args, dataloader_tup):
         to_add = {'equl_vecs_from_train_data': hparams['equl_vecs_from_train_data']}
         aux_dict = {**to_add, **aux_dict}
         
-        with open(f'{args.intermediates_folder}/EVAL_intermediates.pkl', 'wb') as g:
+        with open(f'{args.intermediates_folder}/TEST-SPLIT_intermediates.pkl', 'wb') as g:
             pickle.dump(aux_dict, g)
             
     
@@ -313,7 +379,7 @@ if __name__ == '__main__':
     
     
     # load data
-    dataloader_lst = init_dataloaders(args, onlyTest=True)
+    dataloader_lst = init_dataloaders(args, onlyTest=False)
     
     # run training function
-    eval_pairhmm(args, dataloader_lst)
+    eval_subsOnly(args, dataloader_lst)

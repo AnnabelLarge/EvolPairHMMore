@@ -1,0 +1,32 @@
+TKF91:
+======
+Couple weird things going on here. 
+
+First, if I calculate transition probabilities at times smaller than 0.011, I start to get NaN transitions-
+
+NaN transition at timepoint 6: t=0.00039739671046845615
+NaN transition at timepoint 9: t=0.0005289349937811494
+NaN transition at timepoint 10: t=0.0005818285280838609
+NaN transition at timepoint 11: t=0.0006400113925337791
+NaN transition at timepoint 13: t=0.0007744137546978891
+NaN transition at timepoint 14: t=0.0008518551476299763
+NaN transition at timepoint 16: t=0.0010307447519153357
+NaN transition at timepoint 18: t=0.0012472011148929596
+NaN transition at timepoint 23: t=0.0020086297299712896
+NaN transition at timepoint 26: t=0.0026734862476587296
+NaN transition at timepoint 27: t=0.00294083496555686
+NaN transition at timepoint 30: t=0.003914251457899809
+NaN transition at timepoint 32: t=0.004736244212836027
+NaN transition at timepoint 37: t=0.007627768442034721
+NaN transition at timepoint 40: t=0.010152559727430344
+NaN transition at timepoint 41: t=0.011167815886437893
+
+happens at small timepoints when gamma becomes negative. Consistent even if I use other indel rates
+
+
+Second, float32 vs float64 actually makes a huge difference in the calculation; transition probabilties are different by up to 0.035!
+
+Not sure there's much I can do about this, except disable jit; simplifying the equations isn't really possible
+
+
+
