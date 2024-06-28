@@ -118,13 +118,14 @@ def train_pairhmm(args, dataloader_lst):
     writer = SummaryWriter(args.tboard_dir)
     
     # if debugging, set up an intermediates folder
-    folder_path = f'{os.getcwd()}/{args.training_wkdir}/HMM_INTERMEDIATES'
-    
-    if not os.path.exists(folder_path):
-        os.mkdir(folder_path)
-    
-    args.intermediates_folder = folder_path
-    del folder_path
+    if DEBUG_FLAG:
+        folder_path = f'{os.getcwd()}/{args.training_wkdir}/HMM_INTERMEDIATES'
+        
+        if not os.path.exists(folder_path):
+            os.mkdir(folder_path)
+        
+        args.intermediates_folder = folder_path
+        del folder_path
     
     
     ### use the helper function to import/initialize dataloaders
@@ -213,8 +214,8 @@ def train_pairhmm(args, dataloader_lst):
     # for training function, automatically set debug=False
     parted_train_fn = partial(train_fn,
                               t_arr = t_array,
-                              loss_type = args.loss_type)
-                              # DEBUG_FLAG = False)
+                              loss_type = args.loss_type,
+                              DEBUG_FLAG = False)
     jitted_train_fn = jax.jit(parted_train_fn, 
                              static_argnames=['loss_type',
                                               'DEBUG_FLAG'])
@@ -276,12 +277,11 @@ def train_pairhmm(args, dataloader_lst):
                                   pairHMM = pairHMM, 
                                   params_dict = params, 
                                   hparams_dict = hparams,
-                                  training_rngkey = rngkey_for_training,
-                                  DEBUG_FLAG = True)
+                                  training_rngkey = rngkey_for_training)
             aux_dict, param_grads = out
             del out
             
-            
+            """
             ### DEBUG: output the transition matrix, parameters, and time 
             ### array; make sure code is calculating as Ian's code would, 
             ### for given timepoint
@@ -291,7 +291,7 @@ def train_pairhmm(args, dataloader_lst):
                              'params': pairHMM[-1].undo_param_transform(params)}, g)
                 
                 raise RuntimeError('Stop after one pass; check intermediates')
-            
+            """
             
             
             # update the parameters dictionary with optax

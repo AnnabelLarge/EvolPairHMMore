@@ -57,7 +57,10 @@ def eval_pairhmm(args, dataloader_tup):
     
     # if not provided, assume not in debug mode
     if 'debug' not in vars(args):
-        args.debug = False
+        DEBUG_FLAG = False
+    else:
+        DEBUG_FLAG = args.debug
+
     
     # previous version of code allowed the option for lazy dataloading, but
     #   since GGI model is so small, just get rid of that
@@ -112,15 +115,15 @@ def eval_pairhmm(args, dataloader_tup):
     # rng key
     rngkey = jax.random.key(args.rng_seednum)
     
-    
-    # if debugging, set up an intermediates folder
-    folder_path = f'{os.getcwd()}/{args.eval_wkdir}/HMM_INTERMEDIATES'
-    
-    if not os.path.exists(folder_path):
-        os.mkdir(folder_path)
-    
-    args.intermediates_folder = subfolder_path
-    del folder_path
+    if DEBUG_FLAG:
+        # if debugging, set up an intermediates folder
+        folder_path = f'{os.getcwd()}/{args.eval_wkdir}/HMM_INTERMEDIATES'
+        
+        if not os.path.exists(folder_path):
+            os.mkdir(folder_path)
+        
+        args.intermediates_folder = subfolder_path
+        del folder_path
     
     
     ### use the helper function to import/initialize dataloaders
