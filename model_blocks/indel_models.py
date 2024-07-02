@@ -51,12 +51,14 @@ universal order of dimensions:
 
 TODO:
 =====
+  - at the very least, could TKF models be combined now?
+
   - is there a smarter way to combine all indel models into one flexible (but
     still jit-compatible) class? Things to contend with include:
       > TKF models are fitting an offset, but all others are fitting mu 
         directly; TKF also has alpha_beta function
       > GGI function technically has a different signature, but could be 
-        wrapped up
+        wrapped up?
       > TKF91 doesn't have extension probabilities, but I could just provide 
         placeholder values
 """
@@ -77,6 +79,9 @@ from model_blocks.other_transition_funcs import KM03_Ftransitions
 # We replace zeroes and infinities with small numbers sometimes
 # It's sinful but BOY DO I LOVE SIN
 smallest_float32 = jnp.finfo('float32').smallest_normal
+
+# used to ensure numerical stability of tkf methods
+TKF_STABILITY_ADDITION = 1e-3
 
 
 ###############################################################################
@@ -599,10 +604,6 @@ class TKF91_single(GGI_single):
         WHEN IS THIS CALLED: every training loop iteration, every point t
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
-        # make sure TKF mu >= lambda
-        #   it's kind of a bad hack...not sure what else to try though
-        TKF_STABILITY_ADDITION = 1e-3
-
         ### Lambda: unpack params, undo domain transf
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
@@ -618,8 +619,10 @@ class TKF91_single(GGI_single):
             mu = lam + TKF_STABILITY_ADDITION
         
         ### calculate transition probabilities
-        alpha, beta = self.TKF_alpha_beta(lam, mu, t)
-        transmat = TKF91_Ftransitions (alpha, beta, lam, mu, t)
+        alpha, beta, gamma, one_minus_gamma, = self.TKF_coeffs(lam, mu, t)
+        transmat = jnp.array ([[(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
+                               [(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
+                               [(one_minus_gamma)*alpha, gamma, (one_minus_gamma)*(1-alpha)]])
         
         # if any position in transmat is zero, replace with smallest float
         transmat = jnp.where(transmat != 0, transmat, smallest_float32)
@@ -644,7 +647,7 @@ class TKF91_single(GGI_single):
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
             offset = jnp.square(offset_transf)
-            mu = lam + offset + 0.003
+            mu = lam + offset + TKF_STABILITY_ADDITION
             
             out_dict = {'lam': lam,
                         'mu': mu}
@@ -656,14 +659,17 @@ class TKF91_single(GGI_single):
     
     
     ################   v__(extra functions placed below)__v   ################
-    def TKF_alpha_beta (self, lam, mu, t):
+    def TKF_coeffs (self, lam, mu, t):
         alpha = jnp.exp(-mu*t)
+        beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+        gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
         
-        beta_num = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t)))
-        beta_denom = (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
-        beta = beta_num / beta_denom
+        # if gamma <= 0, replace it and (1-gamma)
+        gamma, one_minus_gamma = jnp.where(gamma > 0,
+                                           jnp.array([ gamma, (1-gamma) ]),
+                                           jnp.array([ smallest_float32, (1-1e-7) ]))
         
-        return alpha, beta
+        return alpha, beta, gamma, one_minus_gamma
     
 
 
@@ -781,7 +787,7 @@ class TKF92_single(TKF91_single):
         """
         # make sure TKF mu >= lambda
         #   it's kind of a bad hack...not sure what else to try though
-        TKF_STABILITY_ADDITION = 1e-3
+        
 
         ### lambda and x are guaranteed to be there
         # unpack parameters
@@ -811,8 +817,12 @@ class TKF92_single(TKF91_single):
             y = x
         
         ### calculate transition probabilities
-        alpha, beta = self.TKF_alpha_beta(lam, mu, t)
-        transmat = TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t)
+        alpha, beta, gamma, one_minus_gamma, = self.TKF_coeffs(lam, mu, t)
+        r = (x + y) / 2
+        
+        transmat = jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
+                               [(1-r)*(1-beta)*alpha, r + (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
+                               [(1-r)*(one_minus_gamma)*alpha, (1-r)*gamma, r + (1-r)*(one_minus_gamma)*(1-alpha)]])
         
         # if any position in transmat is zero, replace with smallest float
         transmat = jnp.where(transmat != 0, transmat, smallest_float32)
@@ -846,7 +856,7 @@ class TKF92_single(TKF91_single):
             
             # undo domain transformation
             offset = jnp.square(offset_transf)
-            mu = lam + offset + 0.003
+            mu = lam + offset + TKF_STABILITY_ADDITION
             y = jnp.exp(-jnp.square(y_transf))
             
             # add to output dictionary

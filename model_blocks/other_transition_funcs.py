@@ -10,46 +10,6 @@ Additional functions from Ian
 """
 import jax.numpy as jnp
 
-# All functions return 3x3 transition matrices of the form
-# [[tMM,tMI,tMD],[tIM,tII,tID],[tDM,tDI,tDD]]
-# where tXY is the transition probability from state X->Y,
-# so that  sum_j tij = 1  for any i.
-
-# # Helper functions for TKF91 and TKF92
-# def TKF_alpha_beta (lam, mu, t):
-#   alpha = jnp.exp(-mu*t)
-#   beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
-  
-#   return alpha, beta
-
-# TKF91
-# Thorne, Kishino, and Felsenstein, 1991
-# An evolutionary model for maximum likelihood alignment of DNA sequences.
-# J. Mol. Evol.  33: 114–124.
-def TKF91_Ftransitions (alpha, beta, lam, mu, t):
-  # alpha, beta = TKF_alpha_beta (lam, mu, t)
-  gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
-
-  
-  return jnp.array ([[(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
-                     [(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
-                     [(1-gamma)*alpha, gamma, (1-gamma)*(1-alpha)]])
-
-# TKF92
-# Thorne, Kishino, and Felsenstein, 1992
-# Inching toward reality: an improved likelihood model of sequence evolution.
-# J. Mol. Evol.  34: 3–16.
-def TKF92_Ftransitions (alpha, beta, lam, mu, x, y, t):
-  """
-  domain problem if mu <= lam
-  """
-  # alpha, beta = TKF_alpha_beta (lam, mu, t)
-  r = (x + y) / 2
-  gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
-  
-  return jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
-        		         [(1-r)*(1-beta)*alpha, r + (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
-		                 [(1-r)*(1-gamma)*alpha, (1-r)*gamma, r + (1-r)*(1-gamma)*(1-alpha)]])
 
 # LG05
 # Löytynoja and Goldman, 2005
@@ -129,6 +89,46 @@ def KM03_Ftransitions (lam, mu, x, y, t):
   return jnp.array ([[T00, T01, T02],
                      [T10, T11, T12],
                      [T20, T21, T22]])
+
+
+
+# # All functions return 3x3 transition matrices of the form
+# # [[tMM,tMI,tMD],[tIM,tII,tID],[tDM,tDI,tDD]]
+# # where tXY is the transition probability from state X->Y,
+# # so that  sum_j tij = 1  for any i.
+
+# # # Helper functions for TKF91 and TKF92
+# # def TKF_alpha_beta (lam, mu, t):
+# #   alpha = jnp.exp(-mu*t)
+# #   beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+  
+# #   return alpha, beta
+
+# # TKF91
+# # Thorne, Kishino, and Felsenstein, 1991
+# # An evolutionary model for maximum likelihood alignment of DNA sequences.
+# # J. Mol. Evol.  33: 114–124.
+# def TKF91_Ftransitions (alpha, beta, gamma, one_minus_gamma):
+#   # alpha, beta = TKF_alpha_beta (lam, mu, t)
+#   # gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
+#   return jnp.array ([[(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
+#                      [(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
+#                      [(one_minus_gamma)*alpha, gamma, (one_minus_gamma)*(1-alpha)]])
+
+# # TKF92
+# # Thorne, Kishino, and Felsenstein, 1992
+# # Inching toward reality: an improved likelihood model of sequence evolution.
+# # J. Mol. Evol.  34: 3–16.
+# def TKF92_Ftransitions (alpha, beta, gamma, one_minus_gamma, r):
+#   # alpha, beta = TKF_alpha_beta (lam, mu, t)
+#   # r = (x + y) / 2
+#   # gamma =  1 - ( (mu * beta) / ( lam * (1-alpha) ) )
+  
+#   return jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
+#         		         [(1-r)*(1-beta)*alpha, r + (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
+#                      [(1-r)*(1-gamma)*alpha, (1-r)*gamma, r + (1-r)*(1-gamma)*(1-alpha)]])
+
+
 
 
 
