@@ -70,8 +70,6 @@ from jax.nn import softmax
 
 ### import transition functions from Ian
 from model_blocks.GGI_funcs import transitionMatrix as GGI_Ftransitions
-from model_blocks.other_transition_funcs import TKF91_Ftransitions
-from model_blocks.other_transition_funcs import TKF92_Ftransitions
 from model_blocks.other_transition_funcs import LG05_Ftransitions
 from model_blocks.other_transition_funcs import RS07_Ftransitions
 from model_blocks.other_transition_funcs import KM03_Ftransitions
@@ -619,7 +617,7 @@ class TKF91_single(GGI_single):
             mu = lam + TKF_STABILITY_ADDITION
         
         ### calculate transition probabilities
-        alpha, beta, gamma, one_minus_gamma, = self.TKF_coeffs(lam, mu, t)
+        alpha, beta, gamma, one_minus_gamma = self.TKF_coeffs(lam, mu, t)
         transmat = jnp.array ([[(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
                                [(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
                                [(one_minus_gamma)*alpha, gamma, (one_minus_gamma)*(1-alpha)]])
@@ -664,10 +662,15 @@ class TKF91_single(GGI_single):
         beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
         gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
         
-        # if gamma <= 0, replace it and (1-gamma)
+        # can't have gamma < 0, or you'll be in a personal hell
         gamma, one_minus_gamma = jnp.where(gamma > 0,
-                                           jnp.array([ gamma, (1-gamma) ]),
+                                           jnp.concatenate([ gamma, (1-gamma) ]),
                                            jnp.array([ smallest_float32, (1-1e-7) ]))
+
+        # TODO: not numerically instable, but you get weird results if beta=0 (meaning gamma = 1)
+        
+        gamma = gamma[None]
+        one_minus_gamma = one_minus_gamma[None]
         
         return alpha, beta, gamma, one_minus_gamma
     
@@ -817,7 +820,7 @@ class TKF92_single(TKF91_single):
             y = x
         
         ### calculate transition probabilities
-        alpha, beta, gamma, one_minus_gamma, = self.TKF_coeffs(lam, mu, t)
+        alpha, beta, gamma, one_minus_gamma = self.TKF_coeffs(lam, mu, t)
         r = (x + y) / 2
         
         transmat = jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
