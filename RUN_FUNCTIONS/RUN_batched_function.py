@@ -13,6 +13,7 @@ same as train_pairhmm, but for a list of JSON configs using the same dataset
 """
 
 if __name__ == '__main__':
+    import jax
     import json
     import argparse 
     import os

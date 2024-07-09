@@ -106,7 +106,7 @@ def eval_subsOnly(args, dataloader_lst):
     ###########################################################################
     print(f'1: setup')
     # output file for individual results per sample
-    output_persamp_file = f'{args.eval_wkdir}/LOGPROB-PER-SAMP.tsv'
+    output_persamp_file = f'{args.eval_wkdir}/[replace]_LOGPROB-PER-SAMP.tsv'
     output_ave_file = f'{args.eval_wkdir}/AVE-LOGPROB.tsv'
     
     # if debugging, set up an intermediates folder
@@ -265,7 +265,8 @@ def eval_subsOnly(args, dataloader_lst):
         g.write(f'{final_ave_train_loss_seqlen_normed}\t')
     
     # save whole dataframe and remove from memory
-    final_loglikes_train_set.to_csv(output_persamp_file, sep='\t')
+    outfile = output_persamp_file.replace('[replace]','TRAIN-SPLIT')
+    final_loglikes_train_set.to_csv(outfile, sep='\t')
     del final_loglikes_train_set
     
     # output the aux dict from the final batch, if debugging
@@ -325,12 +326,13 @@ def eval_subsOnly(args, dataloader_lst):
     final_loglikes_test_set = pd.concat(final_loglikes_test_set)
     final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
     final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
-    with open(output_ave_file, 'w') as g:
+    with open(output_ave_file, 'a') as g:
         g.write(f'{final_ave_test_loss}\t')
         g.write(f'{final_ave_test_loss_seqlen_normed}\n')
     
     # save whole dataframe and remove from memory
-    final_loglikes_test_set.to_csv(output_persamp_file, sep='\t')
+    outfile = output_persamp_file.replace('[replace]','TEST-SPLIT')
+    final_loglikes_test_set.to_csv(outfile, sep='\t')
     del final_loglikes_test_set
     
     # output the aux dict from the final batch, if debugging
