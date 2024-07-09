@@ -78,8 +78,9 @@ from model_blocks.other_transition_funcs import KM03_Ftransitions
 # It's sinful but BOY DO I LOVE SIN
 smallest_float32 = jnp.finfo('float32').smallest_normal
 
-# used to ensure numerical stability of tkf methods
-TKF_STABILITY_ADDITION = 1e-3
+# offset for tkf models
+TKF_ERR = 1e-4
+
 
 
 ###############################################################################
@@ -549,9 +550,8 @@ class TKF91_single(GGI_single):
               > DEFAULT: 0.5
               > DOMAIN RESTRICTION: greater than 0
             
-            - offset (mu = lambda + offest + TKF_STABILITY_ADDITION)
-              > TKF_STABILITY_ADDITION is 1e-3, until something fails...
-              > DEFAULT: 0.01
+            - offset (mu = lambda*(1+TKF_ERR) + offset)
+              > DEFAULT: 0.0001
         """
         provided_args = dir(argparse_obj)
         
@@ -611,16 +611,17 @@ class TKF91_single(GGI_single):
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
             offset = jnp.square(offset_transf)
-            mu = lam + offset + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR) + offset
         
         else:
-            mu = lam + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR)
         
         ### calculate transition probabilities
-        alpha, beta, gamma, one_minus_gamma = self.TKF_coeffs(lam, mu, t)
-        transmat = jnp.array ([[(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
-                               [(1-beta)*alpha, beta, (1-beta)*(1-alpha)],
-                               [(one_minus_gamma)*alpha, gamma, (one_minus_gamma)*(1-alpha)]])
+        # come back here
+        alpha, beta, gamma = self.TKF_coeffs(lam, mu, t)
+        transmat = jnp.array ([[(1-beta)*alpha,  beta,  (1-beta)*(1-alpha)],
+                               [(1-beta)*alpha,  beta,  (1-beta)*(1-alpha)],
+                               [(1-gamma)*alpha, gamma, (1-gamma)*(1-alpha)]])
         
         # if any position in transmat is zero, replace with smallest float
         transmat = jnp.where(transmat != 0, transmat, smallest_float32)
@@ -645,10 +646,11 @@ class TKF91_single(GGI_single):
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
             offset = jnp.square(offset_transf)
-            mu = lam + offset + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR) + offset
             
             out_dict = {'lam': lam,
-                        'mu': mu}
+                        'mu': mu,
+                        'offset': offset}
         
         else:
             indel_rate = lam
@@ -658,21 +660,18 @@ class TKF91_single(GGI_single):
     
     ################   v__(extra functions placed below)__v   ################
     def TKF_coeffs (self, lam, mu, t):
+        """
+        using more stable approximation of beta:
+        beta = (lam*t)/(lam*t + 1)
+        
+        valid if (lam * TKF_ERR * t) << 1
+        """
         alpha = jnp.exp(-mu*t)
-        beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+        # beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+        beta = ( lam * t ) / ( lam*t + 1 )
         gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
         
-        # can't have gamma < 0, or you'll be in a personal hell
-        gamma, one_minus_gamma = jnp.where(gamma > 0,
-                                           jnp.concatenate([ gamma, (1-gamma) ]),
-                                           jnp.array([ smallest_float32, (1-1e-7) ]))
-
-        # TODO: not numerically instable, but you get weird results if beta=0 (meaning gamma = 1)
-        
-        gamma = gamma[None]
-        one_minus_gamma = one_minus_gamma[None]
-        
-        return alpha, beta, gamma, one_minus_gamma
+        return alpha, beta, gamma
     
 
 
@@ -695,15 +694,14 @@ class TKF92_single(TKF91_single):
               > DEFAULT: 0.5
               > DOMAIN RESTRICTION: greater than 0
             
-            - offset (mu = lambda + offest + TKF_STABILITY_ADDITION)
-              > TKF_STABILITY_ADDITION is 1e-3, until something fails...
-              > DEFAULT: 0.01
+            - offset (mu = lambda*(1+TKF_ERR) + offset)
+              > DEFAULT: 0.0001
             
-            - x (extension probability)
+            - x (insertion extension probability)
               > DEFAULT:  0.5
               > DOMAIN RESTRICTION: (0, 1)
                   
-            - y (retraction probability)
+            - y (deletion extension probability)
               > DEFAULT:  0.5
               > DOMAIN RESTRICTION: (0, 1)
         """
@@ -810,22 +808,22 @@ class TKF92_single(TKF91_single):
             
             # undo domain transformations; calculate mu
             offset = jnp.square(offset_transf)
-            mu = lam + offset + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR) + offset
             y = jnp.exp(-jnp.square(y_transf))
             
         
         else:
             ### mu takes on value of lambda, y takes on value of x
-            mu = lam + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR)
             y = x
         
         ### calculate transition probabilities
-        alpha, beta, gamma, one_minus_gamma = self.TKF_coeffs(lam, mu, t)
+        alpha, beta, gamma = self.TKF_coeffs(lam, mu, t)
         r = (x + y) / 2
         
         transmat = jnp.array ([[r + (1-r)*(1-beta)*alpha, (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
                                [(1-r)*(1-beta)*alpha, r + (1-r)*beta, (1-r)*(1-beta)*(1-alpha)],
-                               [(1-r)*(one_minus_gamma)*alpha, (1-r)*gamma, r + (1-r)*(one_minus_gamma)*(1-alpha)]])
+                               [(1-r)*(1-gamma)*alpha, (1-r)*gamma, r + (1-r)*(1-gamma)*(1-alpha)]])
         
         # if any position in transmat is zero, replace with smallest float
         transmat = jnp.where(transmat != 0, transmat, smallest_float32)
@@ -859,7 +857,7 @@ class TKF92_single(TKF91_single):
             
             # undo domain transformation
             offset = jnp.square(offset_transf)
-            mu = lam + offset + TKF_STABILITY_ADDITION
+            mu = lam*(1+TKF_ERR) + offset
             y = jnp.exp(-jnp.square(y_transf))
             
             # add to output dictionary
@@ -867,6 +865,7 @@ class TKF92_single(TKF91_single):
             out_dict['mu'] = mu
             out_dict['x'] = x
             out_dict['y'] = y
+            out_dict['offset'] = offset
         
         else:
             ### mu takes on value of lambda, y takes on value of x
