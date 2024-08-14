@@ -666,8 +666,12 @@ class TKF91_single(GGI_single):
         
         valid if (lam * TKF_ERR * t) << 1
         """
+        ### original calculations
         alpha = jnp.exp(-mu*t)
         # beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+        
+        ### approximations as needed
+        # alpha = (1 - (lam*TKF_ERR*t) ) * jnp.exp(-lam*t)
         beta = ( lam * t ) / ( lam*t + 1 )
         gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
         
@@ -713,7 +717,7 @@ class TKF92_single(TKF91_single):
         #   tying weights
         if 'indel_rate' in provided_args:
             lam = argparse_obj.indel_rate
-            mu = argparse_obj.indel_rate
+            mu = lam*(1+TKF_ERR)
         
         # if this isn't provided, see if lam or offset are provided; check these
         # seperately, in the weird case you may provide one but not the other
