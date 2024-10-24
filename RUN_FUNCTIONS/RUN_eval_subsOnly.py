@@ -249,8 +249,8 @@ def eval_subsOnly(args, dataloader_lst):
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = training_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
-                                                      batch_out_df['desc_seq_len'])
+        # batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+        #                                               batch_out_df['desc_seq_len'])
         
         final_loglikes_train_set.append(batch_out_df)
         
@@ -258,11 +258,11 @@ def eval_subsOnly(args, dataloader_lst):
     # concatenate values
     final_loglikes_train_set = pd.concat(final_loglikes_train_set)
     final_ave_train_loss = final_loglikes_train_set['logP_perSamp'].mean()
-    final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
+    # final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
     with open(output_ave_file, 'w') as g:
         g.write(f'{args.eval_wkdir}\t')
         g.write(f'{final_ave_train_loss}\t')
-        g.write(f'{final_ave_train_loss_seqlen_normed}\t')
+        # g.write(f'{final_ave_train_loss_seqlen_normed}\t')
     
     # save whole dataframe and remove from memory
     outfile = output_persamp_file.replace('[replace]','TRAIN-SPLIT')
@@ -317,18 +317,18 @@ def eval_subsOnly(args, dataloader_lst):
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = test_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
-                                                      batch_out_df['desc_seq_len'])
+        # batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+        #                                               batch_out_df['desc_seq_len'])
         
         final_loglikes_test_set.append(batch_out_df)
     
     # concatenate values; save average losses
     final_loglikes_test_set = pd.concat(final_loglikes_test_set)
     final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
-    final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
+    # final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
     with open(output_ave_file, 'a') as g:
-        g.write(f'{final_ave_test_loss}\t')
-        g.write(f'{final_ave_test_loss_seqlen_normed}\n')
+        g.write(f'{final_ave_test_loss}\n')
+        # g.write(f'{final_ave_test_loss_seqlen_normed}\n')
     
     # save whole dataframe and remove from memory
     outfile = output_persamp_file.replace('[replace]','TEST-SPLIT')

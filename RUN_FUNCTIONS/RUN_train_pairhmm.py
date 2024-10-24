@@ -503,15 +503,15 @@ def train_pairhmm(args, dataloader_lst):
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = training_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
-                                                      batch_out_df['desc_seq_len'])
+        # batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+        #                                               batch_out_df['desc_seq_len'])
         
         final_loglikes_train_set.append(batch_out_df)
     
     # concatenate values
     final_loglikes_train_set = pd.concat(final_loglikes_train_set)
     final_ave_train_loss = final_loglikes_train_set['logP_perSamp'].mean()
-    final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
+    # final_ave_train_loss_seqlen_normed = final_loglikes_train_set['logP_perSamp_length_normed'].mean()
     
     # save whole dataframe and remove from memory
     final_loglikes_train_set.to_csv(f'{args.training_wkdir}/train-set_loglikes.tsv', sep='\t')
@@ -520,7 +520,7 @@ def train_pairhmm(args, dataloader_lst):
     # update the logfile with final losses
     with open(args.logfile_name,'a') as g:
         g.write(f'Training set average loglike: {final_ave_train_loss}\n')
-        g.write(f'Training set average loglike (normed by desc seq len): {final_ave_train_loss_seqlen_normed}\n\n')
+        # g.write(f'Training set average loglike (normed by desc seq len): {final_ave_train_loss_seqlen_normed}\n\n')
     
     # clean up variables
     del training_dl, training_dset, batch, batch_idx, rng_for_final_train
@@ -563,15 +563,15 @@ def train_pairhmm(args, dataloader_lst):
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = test_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
-                                                      batch_out_df['desc_seq_len'])
+        # batch_out_df['logP_perSamp_length_normed'] = (batch_out_df['logP_perSamp'] / 
+        #                                               batch_out_df['desc_seq_len'])
         
         final_loglikes_test_set.append(batch_out_df)
     
     # concatenate values
     final_loglikes_test_set = pd.concat(final_loglikes_test_set)
     final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
-    final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
+    # final_ave_test_loss_seqlen_normed = final_loglikes_test_set['logP_perSamp_length_normed'].mean()
     
     # save whole dataframe and remove from memory
     final_loglikes_test_set.to_csv(f'{args.training_wkdir}/test-set_loglikes.tsv', sep='\t')
@@ -580,7 +580,7 @@ def train_pairhmm(args, dataloader_lst):
     # update the logfile with final losses
     with open(args.logfile_name,'a') as g:
         g.write(f'Test set average loglike: {final_ave_test_loss}\n')
-        g.write(f'Test set average loglike (normed by desc seq len): {final_ave_test_loss_seqlen_normed}\n\n')
+        # g.write(f'Test set average loglike (normed by desc seq len): {final_ave_test_loss_seqlen_normed}\n\n')
     
     # output the aux dict from the final batch, if debugging
     if DEBUG_FLAG:
