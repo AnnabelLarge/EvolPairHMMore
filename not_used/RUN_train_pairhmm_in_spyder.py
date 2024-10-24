@@ -93,7 +93,7 @@ class FakeArgparse:
        	self.equl_model_type= "equl_base"
        
        	self.indel_model_type= "GGI_single"
-       	self.tie_params= False
+       	self.tie_params= True
            
        	self.lam= 0.5
        	self.mu= 0.5
@@ -106,12 +106,18 @@ class FakeArgparse:
 
 
 if __name__ == '__main__':
+    import os
+    import shutil
+    
     ### init a fake model, according to above
     args = FakeArgparse()
     
     
     from RUN_FUNCTIONS.RUN_train_pairhmm import train_pairhmm
     from utils.init_dataloaders import init_dataloaders
+    
+    if 'EXAMPLE_OUT' in os.listdir():
+        shutil.rmtree('EXAMPLE_OUT')
     
     # load data
     dataloader_tup = init_dataloaders(args)

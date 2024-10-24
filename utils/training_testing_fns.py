@@ -106,8 +106,11 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     subCounts_persamp = all_counts[0] 
     insCounts_persamp = all_counts[1] 
     delCounts_persamp = all_counts[2]
-    transCounts_persamp = all_counts[3]
+    transCounts_persamp = all_counts[3] #(B, 3, 3)
     del all_counts
+    
+    align_len = transCounts_persamp.sum( axis=(1,2) )+1 #(B,)
+    
     
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
@@ -309,6 +312,10 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         # (batch, )
         logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                    axis=0)
+        
+        # normalize by alignment length (for now... probably more correct 
+        #   to normalize by descendant length)
+        logP_perSamp = logP_perSamp/align_len
 
         # output sum to get larger average across all batches
         # (not just this particular batch)
@@ -369,6 +376,8 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     delCounts_persamp = all_counts[2]
     transCounts_persamp = all_counts[3]
     del all_counts
+    
+    align_len = transCounts_persamp.sum( axis=(1,2) ) + 1
     
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
@@ -567,6 +576,10 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     # (batch, )
     logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                        axis=0)
+    
+    # normalize by alignment length (for now... probably more correct 
+    #   to normalize by descendant length)
+    logP_perSamp = logP_perSamp/align_len
 
     # return sum_logP, to do larger average over ALL batches (not just this one)
     sum_logP = jnp.sum(logP_perSamp)
