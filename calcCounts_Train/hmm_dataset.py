@@ -66,7 +66,11 @@ class HMMDset(Dataset):
                 data_mat_lst.append(np.load(f))
             
             ### metadata
-            metadata_list.append(pd.read_csv(f'./{data_dir}/{split}_metadata.tsv', sep='\t', index_col=0))
+            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
+            metadata_list.append( pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
+                                               sep='\t', 
+                                               index_col=0,
+                                               use_cols=cols_to_keep ) )
             
             ### counts
             if not subsOnly:
@@ -84,10 +88,9 @@ class HMMDset(Dataset):
         del data_mat_lst
         
         # little bit of post-processing after concatenating all dataframes
-        cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
-        self.names_df = pd.concat(metadata_list, axis=0)[cols_to_keep]
+        self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
-        del cols_to_keep, metadata_list
+        del metadata_list
         
         # generate the lengths matrix
         self.lengths_vec = np.sum( (self.data_mat != 0), axis=1)[:,0]

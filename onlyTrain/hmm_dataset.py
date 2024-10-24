@@ -74,7 +74,11 @@ class HMMDset_PC(Dataset):
                 subCounts_list.append(np.load(f))
             
             # metadata
-            metadata_list.append(pd.read_csv(f'./{data_dir}/{split}_metadata.tsv', sep='\t', index_col=0))
+            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
+            metadata_list.append( pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
+                                               sep='\t', 
+                                               index_col=0,
+                                               usecols = cols_to_keep) )
             
             if not subsOnly:
                 # insCounts
@@ -126,11 +130,9 @@ class HMMDset_PC(Dataset):
             self.transCounts = np.zeros( (num_samps, 3, 3) )
             
         # little bit of post-processing after concatenating all dataframes
-        cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
-        self.names_df = pd.concat(metadata_list, axis=0)[cols_to_keep]
-        
+        self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
-        del cols_to_keep, metadata_list
+        del metadata_list
         
         # generate length vector from transition counts
         # this length vector will only be accurate for including ALL positions,
