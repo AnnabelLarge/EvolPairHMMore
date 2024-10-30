@@ -45,7 +45,7 @@ lines_to_write.append('\t"learning_rate": [FLOAT], \n')
 lines_to_write.append('\t"patience": [INT], \n')
 lines_to_write.append('\t"early_stop_rtol": [FLOAT], \n')
 lines_to_write.append('\t"loss_type": [STR: "conditional","joint"], \n')
-lines_to_write.append('\t"norm_loss_by": [STR: "desc_len","align_len"] \n')
+lines_to_write.append('\t"norm_loss_by": [STR: "num_match_pos","desc_len","align_len"] \n')
 lines_to_write.append('\n')
 
 # time grid
@@ -59,7 +59,7 @@ lines_to_write.append('\n')
 ########################
 ### SUBSTITUTION MODEL #
 ########################
-valid_options = ['subst_base','subst_mixture']
+valid_options = ['subst_base','subst_mixture', 'subst_from_file']
 to_write = ', '.join(valid_options)
 subst_model_type = input(f"What substitution model? ({to_write})\n")
 assert subst_model_type in valid_options, f'Invalid selection: {subst_model_type}'
@@ -75,7 +75,7 @@ if subst_model_type == 'subst_base':
 
 
 ### mixture of substitution models
-elif susbt_model_type == 'subst_mixture':
+elif subst_model_type == 'subst_mixture':
     lines_to_write.append('\t"exch_files": [ list of STR; size=(k_subst,) ], \n')
     
     # how to handle mixture logits?
@@ -87,6 +87,9 @@ elif susbt_model_type == 'subst_mixture':
         lines_to_write.append('\t"subst_mix_logits": [ list of FLOAT; size=(k_subst,) ], \n')
     else:
         lines_to_write.append('\t"k_subst": [INT], \n')
+
+elif subst_model_type == 'subst_from_file':
+    lines_to_write.append('\t"cond_logprobs_file": [STR], \n')
     
         
 lines_to_write.append('\t"gap_tok": 43, \n') #my pipeline makes gap tokens 43

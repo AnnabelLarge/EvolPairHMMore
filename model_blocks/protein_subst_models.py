@@ -16,6 +16,8 @@ Protein substitution models (i.e. the EMISSIONS from match states):
 2. subst_mixture: mixture of substitution models, given by set list of 
      exchangeability matrices
 
+3. subst_from_file
+
 
 at a minimum, future classes need:
 ==================================
@@ -319,3 +321,66 @@ class subst_mixture(subst_base):
         
         return out_dict
 
+
+###############################################################################
+### load logprobs from file   #################################################
+###############################################################################
+class subst_from_file(subst_base):
+    """
+    one conditional logprobs file for all timepoints, no mixtures
+    used for baselines
+    
+    inherits: pytree functions, undo_param_transform()
+    """
+    def __init__(self, norm):
+        """
+        placeholder to retain signature
+        """
+        self.norm = None
+    
+    
+    def initialize_params(self, argparse_obj):
+        """
+        ABOUT: load one log-probability matrix
+        JITTED: no
+        WHEN IS THIS CALLED: once, upon model instantiation
+        OUTPUTS: dictionary of initial parameters for optax (if any)
+        
+        params to fit: (none, return empty dictionary)
+        hparams to pass on (or infer): 
+            - cond_logprobs
+            - alphabet_size
+        """
+        file_to_load = argparse_obj.cond_logprobs_file
+        with open(file_to_load,'rb') as f:
+            cond_logprobs = np.load(f)
+        
+        # final shape should be (i, j, k_subst=1, k_equl=1)
+        if len(cond_logprobs.shape) == 2:
+            cond_logprobs = cond_logprobs[:,:,None,None] 
+        
+        hparams = {'alphabet_size': argparse_obj.alphabet_size,
+                   'cond_logprobs': cond_logprobs}
+        
+        return dict(), hparams
+    
+    
+    def conditional_logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        ABOUT: return logP(x(t)=j | x(0)=i), loaded from file
+        JITTED: yes
+        WHEN IS THIS CALLED: every training loop, every timepoint
+        OUTPUTS: logP(x(t)=j | x(0)=i), the conditional log-probability of 
+                 substitutions
+                 a (alphabet_size, alphabet_size, 1, 1) tensor
+        """
+        cond_logprobs = hparams_dict['cond_logprobs']
+        return cond_logprobs
+    
+    
+    def joint_logprobs_at_t(self, t, params_dict, hparams_dict):
+        """
+        placeholder
+        """
+        raise NotImplementedError
+    

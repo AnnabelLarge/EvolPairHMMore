@@ -1,0 +1,34 @@
+{
+	"training_wkdir": "score_conditional_logprobs", 
+	"rng_seednum": 0, 
+	"debug": false, 
+
+	"alphabet_size": 20, 
+	"have_precalculated_counts": false, 
+	"data_dir": "examples/DEV_hmm_pairAlignments", 
+	"train_dset_splits": ["PF00001"], 
+	"test_dset_splits": ["PF00001"], 
+	"batch_size": 40, 
+
+	"num_epochs": 1, 
+	"learning_rate": 0.1, 
+	"patience": 1, 
+	"early_stop_rtol": 1, 
+	"loss_type": "conditional",
+	"norm_loss_by": "desc_len",
+
+	"t_grid_center": 0.15, 
+	"t_grid_step": 0.15, 
+	"t_grid_num_steps": 1, 
+
+	"subst_model_type": "subst_from_file", 
+	"subsOnly": false, 
+	"norm": true, 
+	"cond_logprobs_file": "./new_unit_test/DEV-PF00001_match-cond-logprob.npy", 
+	"gap_tok": 43, 
+
+	"equl_model_type": "equl_base", 
+
+	"indel_model_type": "no_indel"
+
+}

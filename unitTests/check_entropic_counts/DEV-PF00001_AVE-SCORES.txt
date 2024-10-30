@@ -1,0 +1,37 @@
+EvolPairHMMore checksums:
+==============================
+DON'T INLUCDE <bos>, <eos> as emissions
+Normalize by UNALIGNED DESCENDANT LENGTH
+
+
+setup
+-----------------------------
+data_dir: examples/DEV_hmm_pairAlignments
+train_dset_splits: ['PF00001']
+alphabet_size: 20
+gap_tok: 43
+
+
+logP( desc_tok | anc_tok )
+-----------------------------
+Average logprob: -2.6222885595180196
+Average perplexity: 13.855545603256411
+ECE: 13.76719460393952
+
+
+logP( desc_tok )
+-----------------------------
+Average logprob: -2.8644183881101903
+Average perplexity: 17.548920262945316
+ECE: 17.53884943419263
+
+
+logP( desc_tok ) ONLY at match sites
+------------------------------------------------
+Average logprob: -2.843469839082208
+Average perplexity: 17.181855230425835
+ECE: 17.175257643657375
+
+
+
+Scores from EvolPairHMMore match hand calculations here!

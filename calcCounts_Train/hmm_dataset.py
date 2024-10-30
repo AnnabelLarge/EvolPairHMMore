@@ -78,6 +78,8 @@ class HMMDset(Dataset):
             else:
                 counts_file = f'./{data_dir}/{split}_AAcounts_subsOnly.npy'
             
+            print(f'Equilibrium counts coming from: {counts_file}')
+            
             with open(counts_file, 'rb') as f:
                 self.AAcounts += np.load(f)
                 

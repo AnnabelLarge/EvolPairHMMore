@@ -120,9 +120,12 @@ def train_fn(all_counts,
     # decide what length to normalize final loss by (default is
     #   ungapped descendant length)
     num_matches = subCounts_persamp.sum( axis=(1,2) ) #(B, )
-    num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
     
-    if norm_loss_by == 'desc_len':
+    if norm_loss_by == 'num_match_pos':
+        length_for_normalization = num_matches # (B,)
+    
+    elif norm_loss_by == 'desc_len':
+        num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
         length_for_normalization = num_matches + num_ins #(B, )
     
     elif norm_loss_by == 'align_len':
@@ -407,9 +410,12 @@ def eval_fn(all_counts,
     # decide what length to normalize final loss by (default is
     #   ungapped descendant length)
     num_matches = subCounts_persamp.sum( axis=(1,2) ) #(B, )
-    num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
     
-    if norm_loss_by == 'desc_len':
+    if norm_loss_by == 'num_match_pos':
+        length_for_normalization = num_matches # (B,)
+    
+    elif norm_loss_by == 'desc_len':
+        num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
         length_for_normalization = num_matches + num_ins #(B, )
     
     elif norm_loss_by == 'align_len':

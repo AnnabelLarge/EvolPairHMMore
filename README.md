@@ -234,6 +234,32 @@ At a minimum, future classes need the following methods:
 
 #### `undo_param_transform(self, params_dict)` (see above)
 
+### After creating model class
+Need to add imports/initializations to `utils.setup_utils.model_import_register()`
+
+## Unit tests/Baselines
+### Basic unit tests
+Run a basic suite with:
+```
+python ./unitTest/RUN_unitTests.py
+```
+These broadly cover things like:
+  - do einsum recipes match hand-done loops?
+  - does my implementation of the H20 model match Ian's implementation?
+  - is loss being calculated as I expect?
+
+### Conditional/Descendant Entropy Scoring
+This work can be found in `./unitTest/check_entropic_counts`. It's kind of a baseline and a unit test in one.  
+
+Steps:  
+  1. Move this folder to top-level
+  2. Run `hand_calculate_entropy_scores.py` to hand-calculate losses according to either:
+     - frequencies of (descendant characters, given aligned ancestor characters); likelihood will match the conditional logprob P(desc | anc, align)
+     - frequencies of descendant characters; likelihood will match the marginal logprob P(desc)
+     - frequencies of descendant characters ONLY at match sites (i.e. ignore indels)
+  3. Do a fake training run using `EvolPairHMMore.py` and the config files in this folder
+  4. Manually verify that likelihoods from fake training runs match the hand-calculated likelihoods
+  5. Compare any future results to those found here
 
 ## Repo organization
 Folders
@@ -249,10 +275,6 @@ Folders
 - `onlyTrain`: use these functions when precomputed counts are given
   - dataloader
 - `unitTests`: folder with suite of unit tests for this codebase
-  - run unit test with:
-  ```
-  python ./unitTest/RUN_unitTests.py
-  ```
   - note that these tests are specifically configured for the example data in this directory; would need to change configs in this folder if you wanted to try out unit tests on NEW data
 - `utils`: scripts to help with training and evaluation
 

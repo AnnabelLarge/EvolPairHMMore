@@ -152,10 +152,6 @@ def train_pairhmm(args, dataloader_lst):
     if args.equl_model_type == 'equl_base':
         equl_model_hparams['equl_vecs_from_train_data'] = training_dset.retrieve_equil_dist()
     
-    # if you're not scoring emissions from indels at all, use this placeholder
-    elif args.equl_model_type == 'no_equl':
-        equl_model_hparams['equl_vecs_from_train_data'] = jnp.zeros((args.alphabet_size))
-    
     
     ### initialize the substitution model
     subst_model_params, subst_model_hparams = subst_model.initialize_params(argparse_obj=args)

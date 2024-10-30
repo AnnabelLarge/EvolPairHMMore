@@ -1,0 +1,5 @@
+python EvolPairHMMore.py -task train_hmm -configs score_conditional_logprobs.json 
+
+python EvolPairHMMore.py -task train_hmm -configs score_marginal_logprobs_no_indels.json
+
+python EvolPairHMMore.py -task train_hmm -configs score_marginal_logprobs.json

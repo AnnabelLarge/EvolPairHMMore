@@ -15,6 +15,8 @@ from cli.eval_pairhmm import eval_pairhmm as eval_hmm
 from cli.eval_subs_only import eval_subs_only as eval_hmm_subs_only
 from utils.init_dataloaders import init_dataloaders
 
+# jax.config.update("jax_enable_x64", True)
+
 
 # for now, running models on single GPU
 err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
@@ -35,7 +37,7 @@ parser.add_argument( '-task',
                      type=str,
                      required=True,
                      choices = valid_tasks,
-                     help='What do you want to do? Pick from: {valid_tasks}' )
+                     help='What do you want to do?' )
 
 ## config files required to run
 parser.add_argument('-configs',
@@ -68,8 +70,10 @@ if args.task == 'train_hmm':
     args = read_config_file(args, args.configs)
     
     dataloader_lst = init_dataloaders(args, onlyTest=False)
-    train_hmm(args = args, 
-              dataloader_lst = dataloader_lst)
+    
+    with jax.disable_jit():
+        train_hmm(args = args, 
+                  dataloader_lst = dataloader_lst)
         
 
 elif args.task == 'train_hmm_batched':

@@ -45,6 +45,7 @@ def eval_subs_only(args, dataloader_lst):
     # overwrite some defaults
     args.equl_model_type == "equl_base"
     args.indel_model_type == "no_indel"
+    args.norm_loss_by == 'num_match_pos'
     
     # create the eval working directory, if it doesn't exist
     if args.eval_wkdir not in os.listdir():
@@ -130,10 +131,6 @@ def eval_subs_only(args, dataloader_lst):
     #   TRAINING data
     if args.equl_model_type == 'equl_base':
         equl_model_hparams['equl_vecs_from_train_data'] = training_dset.retrieve_equil_dist()
-    
-    # if you're not scoring emissions from indels at all, use this placeholder
-    elif args.equl_model_type == 'no_equl':
-        equl_model_hparams['equl_vecs_from_train_data'] = jnp.zeros((args.alphabet_size))
     
     
     ### initialize the substitution model

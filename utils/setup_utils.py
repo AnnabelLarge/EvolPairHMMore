@@ -21,16 +21,20 @@ def model_import_register(args):
     ########################
     ### IMPORT SUBST MODEL #
     ########################
-    # if nothing specified, then use subst_base
-    if args.subst_model_type == 'subst_mixture':
+    if args.subst_model_type == 'subst_base':
+        from model_blocks.protein_subst_models import subst_base as subst_model
+        logfile_msg1 = (f'1.) substitution model: subst_base;'+
+                        f' (norm: {args.norm})\n')
+    
+    elif args.subst_model_type == 'subst_mixture':
         from model_blocks.protein_subst_models import subst_mixture as subst_model
         logfile_msg1 = (f'1.) substitution model: subst_mixture;'+
                         f' (norm: {args.norm}, num_mixes: {args.k_subst})\n')
     
-    elif args.subst_model_type == 'subst_base':
-        from model_blocks.protein_subst_models import subst_base as subst_model
-        logfile_msg1 = (f'1.) substitution model: subst_base;'+
-                        f' (norm: {args.norm})\n')
+    elif args.subst_model_type == 'subst_from_file':
+        from model_blocks.protein_subst_models import subst_from_file as subst_model
+        logfile_msg1 = (f'1.) substitution model: subst_from_file;'+
+                        f' (from file: {args.cond_logprobs_file})\n')
 
     elif args.subst_model_type == 'hky85':
         from model_blocks.dna_subst_models import hky85 as subst_model
