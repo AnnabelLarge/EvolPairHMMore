@@ -248,6 +248,12 @@ Folders
 - `not_used`: internal scripts I use during code development
 - `onlyTrain`: use these functions when precomputed counts are given
   - dataloader
+- `unitTests`: folder with suite of unit tests for this codebase
+  - run unit test with:
+  ```
+  python ./unitTest/RUN_unitTests.py
+  ```
+  - note that these tests are specifically configured for the example data in this directory; would need to change configs in this folder if you wanted to try out unit tests on NEW data
 - `utils`: scripts to help with training and evaluation
 
 Top-level files
