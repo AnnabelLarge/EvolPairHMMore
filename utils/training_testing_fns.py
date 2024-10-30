@@ -76,8 +76,15 @@ def logsumexp_withZeros(x, axis):
 ###############################################################################
 ### MAIN FUNCTIONS   ##########################################################
 ###############################################################################
-def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-             training_rngkey, loss_type, DEBUG_FLAG=False):
+def train_fn(all_counts, 
+             t_arr, 
+             pairHMM, 
+             params_dict, 
+             hparams_dict, 
+             training_rngkey, 
+             loss_type='conditional', 
+             norm_loss_by='desc_len', 
+             DEBUG_FLAG=False):
     """
     Jit-able function to find log-likelihood of both substitutions and indels, 
       and collect gradients
@@ -94,6 +101,7 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > training_rngkey: training rng key to add to hyperparameters 
           dictionary (may or may not be used)
         > loss_type: either "conditional" or "joint"
+        > norm_loss_by: either "desc_len" or "align_len"
         > DEBUG_FLAG: whether or not to output intermediate values; probably 
           don't do this during training loop
     
@@ -109,11 +117,20 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     transCounts_persamp = all_counts[3] #(B, 3, 3)
     del all_counts
     
-    # descendant length comes from number of match + number of ins
+    # decide what length to normalize final loss by (default is
+    #   ungapped descendant length)
     num_matches = subCounts_persamp.sum( axis=(1,2) ) #(B, )
     num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
-    desc_len = num_matches + num_ins #(B, )
     
+    if norm_loss_by == 'desc_len':
+        length_for_normalization = num_matches + num_ins #(B, )
+    
+    elif norm_loss_by == 'align_len':
+        num_dels = delCounts_persamp.sum( axis=1 ) #(B, )
+        length_for_normalization = ( num_matches + 
+                                     num_ins +
+                                     num_dels ) #(B, )
+        
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
     del pairHMM
@@ -315,8 +332,9 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                    axis=0)
         
-        # normalize by descendant length 
-        logP_perSamp = logP_perSamp/desc_len
+        # normalize by length of sequence (either ungapped descendant or 
+        #   full alignment)
+        logP_perSamp = jnp.divide(logP_perSamp, length_for_normalization)
 
         # output sum to get larger average across all batches
         # (not just this particular batch)
@@ -350,8 +368,15 @@ def train_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     
 
 
-def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict, 
-            eval_rngkey, loss_type, DEBUG_FLAG=False):
+def eval_fn(all_counts, 
+            t_arr, 
+            pairHMM, 
+            params_dict, 
+            hparams_dict, 
+            eval_rngkey, 
+            loss_type='conditional', 
+            norm_loss_by='desc_len', 
+            DEBUG_FLAG=False):
     """
     Jit-able function to find log-likelihood of both substitutions and indels
     
@@ -366,6 +391,7 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
         > hparams_dict: hyperparams needed for run
         > eval_rngkey: rng key for eval (may or may not be needed)
         > loss_type: either "conditional" or "joint"
+        > norm_loss_by: either "desc_len" or "align_len"
     
     outputs:
         > loss: negative mean log likelihood
@@ -378,10 +404,19 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     transCounts_persamp = all_counts[3]
     del all_counts
     
-    # descendant length comes from number of match + number of ins
+    # decide what length to normalize final loss by (default is
+    #   ungapped descendant length)
     num_matches = subCounts_persamp.sum( axis=(1,2) ) #(B, )
     num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
-    desc_len = num_matches + num_ins #(B, )
+    
+    if norm_loss_by == 'desc_len':
+        length_for_normalization = num_matches + num_ins #(B, )
+    
+    elif norm_loss_by == 'align_len':
+        num_dels = delCounts_persamp.sum( axis=1 ) #(B, )
+        length_for_normalization = ( num_matches + 
+                                     num_ins +
+                                     num_dels ) #(B, )
     
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
@@ -581,8 +616,9 @@ def eval_fn(all_counts, t_arr, pairHMM, params_dict, hparams_dict,
     logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
                                        axis=0)
     
-    # normalize by descendant length 
-    logP_perSamp = logP_perSamp/desc_len
+    # normalize by length of sequence (either ungapped descendant or 
+    #   full alignment)
+    logP_perSamp = jnp.divide(logP_perSamp, length_for_normalization)
 
     # return sum_logP, to do larger average over ALL batches (not just this one)
     sum_logP = jnp.sum(logP_perSamp)

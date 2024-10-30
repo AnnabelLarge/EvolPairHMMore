@@ -67,17 +67,18 @@ class FakeArgparse:
         self.debug=True
        
        	self.alphabet_size= 20
+       	self.batch_size= 40
        	self.have_precalculated_counts= True
-       	self.loadtype= "eager"
-       	self.data_dir= "DEV-DATA_precalculated_counts"
-       	self.train_dset_splits= ["KPROT_OOD_VALID"]
-       	self.test_dset_splits= ["KPROT_OOD_VALID"]
-       	self.batch_size= 100
+           
+       	self.data_dir= "DEV_hmm_precalc_counts"
+       	self.train_dset_splits= ["PF00001"]
+       	self.test_dset_splits= ["PF00001"]
        
-       	self.num_epochs= 3
+       	self.num_epochs= 2
        	self.learning_rate= 0.001
-       	self.patience= 3
+       	self.patience= 2
        	self.loss_type= "conditional"
+       	self.norm_loss_by='align_len'
        	self.early_stop_rtol=1e-5
        
        	self.t_grid_center= 0.1
@@ -88,20 +89,50 @@ class FakeArgparse:
        	self.norm= True
        	self.subsOnly= False
        	self.exch_files= "LG08_exchangeability_r.npy"
-       	self.gap_tok= 63
+       	self.gap_tok= 43
        
        	self.equl_model_type= "equl_base"
        
+        
+        ##############################################
+        ### uncomment to test different indel models #
+        ##############################################
+        # ### TKF91 model
+       	# self.indel_model_type= "TKF91_single"
+       	# self.tie_params= True
+        # self.lam = 0.5
+       
+        
+        # ### TKF92 model
+       	# self.indel_model_type= "TKF92_single"
+       	# self.tie_params= True
+        # self.lam = 0.5
+        # self.x=0.5
+        
+        
+        # ### other single models
+       	# self.indel_model_type= "otherIndel_single"
+        # self.model_name="LG05"
+       	# self.tie_params= True
+        # self.lam = 0.5
+        # self.x=0.5
+        
+        
+        ### H20 model
        	self.indel_model_type= "GGI_single"
        	self.tie_params= True
            
        	self.lam= 0.5
-       	self.mu= 0.5
        	self.x= 0.5
-       	self.y= 0.5
        	self.diffrax_params= {'step': None,
-                                 'rtol': 1e-3,
-                                 'atol': 1e-6}
+                                  'rtol': 1e-3,
+                                  'atol': 1e-6}
+        
+        
+        # ### no indel model
+        # self.indel_model_type = None
+
+
 
 
 
@@ -109,12 +140,12 @@ if __name__ == '__main__':
     import os
     import shutil
     
+    from cli.train_pairhmm import train_pairhmm
+    from utils.init_dataloaders import init_dataloaders
+    
+    
     ### init a fake model, according to above
     args = FakeArgparse()
-    
-    
-    from RUN_FUNCTIONS.RUN_train_pairhmm import train_pairhmm
-    from utils.init_dataloaders import init_dataloaders
     
     if 'EXAMPLE_OUT' in os.listdir():
         shutil.rmtree('EXAMPLE_OUT')

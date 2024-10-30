@@ -10,9 +10,9 @@ from torch.utils.data import DataLoader
 
 def init_dataloaders(args, onlyTest=False):
     ### DECIDE TRAINING MODE
-    # previous version of code allowed the option for lazy dataloading, but
-    #   since GGI model is so small, just get rid of that
-    assert args.loadtype == 'eager'
+    # # previous version of code allowed the option for lazy dataloading, but
+    # #   since GGI model is so small, just get rid of that
+    # assert args.loadtype == 'eager'
     
     # Use this training mode if you already have precalculated count matrices
     if args.have_precalculated_counts:

@@ -1,0 +1,10 @@
+move data and config folders to top-level, then:
+
+For CONFIGS_DEV-set_full-align
+===============================
+python EvolPairHMMore.py -task train_hmm_batched -configs TRAINING-CONFIGS_DEV-set_full-align
+
+For CONFIGS_DEV-set_precalc-counts
+==================================
+python EvolPairHMMore.py -task train_hmm_batched -configs TRAINING-CONFIGS_DEV-set_precalc-counts
+

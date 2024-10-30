@@ -139,7 +139,7 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
          0: <pad>
          1: <bos> (not included in pairHMM data, but still reserved token)
          2: <eos> (not included in pairHMM data, but still reserved token)
-        63: default gap char (but could be changed; just needs to be >=23)
+        r3: default gap char (but could be changed; just needs to be >=23)
     
     sequence tensor is of size (batch_size, max_seq_len, 2), where-
         dim2=0: ancestor sequence, aligned (i.e. sequence contains gaps)
@@ -165,7 +165,7 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
         4. transCounts: counts of transitions in the batch
     """
     ### unpack batch input to get sequences and align_lens
-    seqs, align_len, _ = batch
+    seqs, _ = batch
     del batch
     
     # clip to max seq len
@@ -191,6 +191,7 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
     
     # combine all into one vec for counting transitions later
     # M = 1, I = 2, D = 3; padding is 0
+    # (B, L)
     paths_compressed = (match_pos + (ins_pos * 2) + (del_pos * 3))
     
     
@@ -199,6 +200,7 @@ def summarize_alignment(batch, max_seq_len, subsOnly,
     # add match at the end of the paths
     extra_end_col = jnp.zeros((seqs.shape[0], 1))
     to_adjust = jnp.concatenate([paths_compressed, extra_end_col], axis=1)
+    align_len = jnp.where(paths_compressed != 0, True, False).sum(axis=1)
     x_idxes = (jnp.arange(0, seqs.shape[0]))
     with_extra_end_match = to_adjust.at[x_idxes, align_len].add(1)
     

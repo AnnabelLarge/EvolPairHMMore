@@ -66,11 +66,11 @@ class HMMDset(Dataset):
                 data_mat_lst.append(np.load(f))
             
             ### metadata
-            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'desc_seq_len']
+            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'alignment_len', 'desc_seq_len']
             metadata_list.append( pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
                                                sep='\t', 
                                                index_col=0,
-                                               use_cols=cols_to_keep ) )
+                                               usecols=cols_to_keep ) )
             
             ### counts
             if not subsOnly:
@@ -92,18 +92,14 @@ class HMMDset(Dataset):
         self.names_df = self.names_df.reset_index(drop=True)
         del metadata_list
         
-        # generate the lengths matrix
-        self.lengths_vec = np.sum( (self.data_mat != 0), axis=1)[:,0]
-        
         
     def __len__(self):
         return self.data_mat.shape[0]
 
     def __getitem__(self, idx):
         sample_seqs = self.data_mat[idx, :, :]
-        sample_align_len = self.lengths_vec[idx]
         sample_idx = idx
-        return (sample_seqs, sample_align_len, sample_idx)
+        return (sample_seqs, sample_idx)
     
     def max_seqlen(self):
         return self.data_mat.shape[1]
@@ -111,10 +107,6 @@ class HMMDset(Dataset):
     def retrieve_sample_names(self, idxes):
         # used the list of sample indices to query the original names_df
         return self.names_df.iloc[idxes]
-    
-    def retrieve_desc_lens(self, idxes):
-        # used to return the length of the descendant sequence
-        return self.names_df.iloc[idxes]['desc_seq_len'].to_numpy()
     
     def write_split_indices(self, idxes):
         # this is a method for early loading, but not lazy loading

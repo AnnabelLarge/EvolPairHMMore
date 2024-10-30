@@ -1,0 +1,7 @@
+	file	matrix_size	matrix_dtype
+3	PF00001_AAcounts.npy	(20,)	uint16
+0	PF00001_AAcounts_subsOnly.npy	(20,)	uint16
+4	PF00001_delCounts.npy	(40, 20)	uint16
+5	PF00001_insCounts.npy	(40, 20)	uint16
+1	PF00001_subCounts.npy	(40, 20, 20)	uint16
+2	PF00001_transCounts.npy	(40, 3, 3)	uint16

@@ -164,28 +164,6 @@ class subst_base:
                                            )
         
         return joint_logprob_substitution_at_t
-        
-    
-    def norm_rate_matrix(self, subst_rate_mat, equl_pi_mat):
-        """
-        ABOUT: this normalizes the rate matrix by the equilibrium vectors, 
-               if self.norm is true
-        JITTED: yes
-        WHEN IS THIS CALLED: whenever logprobs_at_t is called, if self.norm 
-                             is true
-        OUTPUTS: normalized rate matrix
-        """
-        ### diag will be (k_subst, k_equl, alphabet_size) (k,l,i)
-        diag = jnp.diagonal(subst_rate_mat, axis1=0, axis2=1)
-        
-        ### equl_dists is (alphabet_size, k_equl) (i, l)
-        ###    output is (k_subst, k_equl) (k,l)
-        norm_factor = -jnp.einsum('kli, il -> kl', diag, equl_pi_mat)
-        
-        ### divide each subst_rate_mat with this vec (thanks jnp broadcasting!)
-        # (alphabet_size, alphabet_size, k_subst, k_equl) / (k_subst, k_equl)
-        out = subst_rate_mat / norm_factor
-        return out
     
     
     def undo_param_transform(self, params_dict):
@@ -209,7 +187,7 @@ class subst_base:
         return cls(*children, **aux_data)
     
     
-    ###############   v__(extra functions placed below)__v   ###############    
+    #########   v__(standard rate matrix functions placed below)__v   #########  
     def generate_rate_matrix(self, equl_vecs, exch_mat):
         """
         ABOUT: calculating rate matrix R
@@ -239,6 +217,28 @@ class subst_base:
         subst_rate_mat = rate_mat_without_diags + diags_to_add
         
         return subst_rate_mat
+    
+        
+    def norm_rate_matrix(self, subst_rate_mat, equl_pi_mat):
+        """
+        ABOUT: this normalizes the rate matrix by the equilibrium vectors, 
+               if self.norm is true
+        JITTED: yes
+        WHEN IS THIS CALLED: whenever logprobs_at_t is called, if self.norm 
+                             is true
+        OUTPUTS: normalized rate matrix
+        """
+        ### diag will be (k_subst, k_equl, alphabet_size) (k,l,i)
+        diag = jnp.diagonal(subst_rate_mat, axis1=0, axis2=1)
+        
+        ### equl_dists is (alphabet_size, k_equl) (i, l)
+        ###    output is (k_subst, k_equl) (k,l)
+        norm_factor = -jnp.einsum('kli, il -> kl', diag, equl_pi_mat)
+        
+        ### divide each subst_rate_mat with this vec (thanks jnp broadcasting!)
+        # (alphabet_size, alphabet_size, k_subst, k_equl) / (k_subst, k_equl)
+        out = subst_rate_mat / norm_factor[None, None, :, :]
+        return out
     
 
 ###############################################################################

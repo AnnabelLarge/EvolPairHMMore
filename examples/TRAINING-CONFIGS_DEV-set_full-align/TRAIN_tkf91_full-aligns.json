@@ -1,0 +1,36 @@
+{
+	"training_wkdir": "tkf91_full-aligns", 
+	"rng_seednum": 0, 
+	"debug": false, 
+
+	"alphabet_size": 20, 
+	"have_precalculated_counts": false, 
+	"data_dir": "DEV_hmm_pairAlignments", 
+	"train_dset_splits": ["PF00001"], 
+	"test_dset_splits": ["PF00001"], 
+	"batch_size": 40, 
+
+	"num_epochs": 100, 
+	"learning_rate": 0.01,
+	"patience": 100,
+	"early_stop_rtol": 0.0001, 
+	"loss_type": "conditional", 
+	"norm_loss_by": "desc_len", 
+
+	"t_grid_center": 0.1, 
+	"t_grid_step": 1.1, 
+	"t_grid_num_steps": 20, 
+
+	"subst_model_type": "subst_base", 
+	"subsOnly": false, 
+	"norm": true, 
+	"exch_files": "LG08_exchangeability_r.npy", 
+	"gap_tok": 43, 
+
+	"equl_model_type": "equl_base", 
+
+	"indel_model_type": "TKF91_single", 
+	"tie_params": true, 
+	"lam": 0.5 
+
+}

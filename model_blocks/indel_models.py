@@ -889,7 +889,7 @@ class TKF92_single(TKF91_single):
 ###############################################################################
 ### LG05, RS07, KM03   ########################################################
 ###############################################################################
-# this could be the template to combining all indel models into one class
+# this could be the template to combine all indel models into one class
 class otherIndel_single:
     def __init__(self, tie_params, model_name):
         self.tie_params = tie_params
