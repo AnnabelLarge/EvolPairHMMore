@@ -129,6 +129,7 @@ def train_fn(all_counts,
         length_for_normalization = num_matches + num_ins #(B, )
     
     elif norm_loss_by == 'align_len':
+        num_ins = insCounts_persamp.sum( axis=1 ) #(B, )
         num_dels = delCounts_persamp.sum( axis=1 ) #(B, )
         length_for_normalization = ( num_matches + 
                                      num_ins +

@@ -34,12 +34,12 @@ valid_tasks = ['train_hmm','eval_hmm','eval_hmm_subs_only']
 valid_tasks = valid_tasks + [elem + '_batched' for elem in valid_tasks]
 
 parser.add_argument( '-task',
-                     type=str,
-                     required=True,
-                     choices = valid_tasks,
-                     help='What do you want to do?' )
+                      type=str,
+                      required=True,
+                      choices = valid_tasks,
+                      help='What do you want to do?' )
 
-## config files required to run
+# config files required to run
 parser.add_argument('-configs',
                     type = str,
                     required=True,
@@ -48,6 +48,9 @@ parser.add_argument('-configs',
 
 ### parse the arguments
 args = parser.parse_args()
+
+# args.task = 'train_hmm'
+# args.configs = 'TRAIN_tkf92_precalc-counts.json'
 
 
 ### helper function to open a single config file and extract additional arguments

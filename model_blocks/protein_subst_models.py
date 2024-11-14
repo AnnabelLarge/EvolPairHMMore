@@ -16,7 +16,7 @@ Protein substitution models (i.e. the EMISSIONS from match states):
 2. subst_mixture: mixture of substitution models, given by set list of 
      exchangeability matrices
 
-3. subst_from_file
+3. subst_from_file: load the log-probability matrix directly
 
 
 at a minimum, future classes need:

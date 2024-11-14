@@ -70,15 +70,15 @@ class FakeArgparse:
        	self.batch_size= 40
        	self.have_precalculated_counts= True
            
-       	self.data_dir= "DEV_hmm_precalc_counts"
+       	self.data_dir= "examples/DEV_hmm_precalc_counts"
        	self.train_dset_splits= ["PF00001"]
        	self.test_dset_splits= ["PF00001"]
        
-       	self.num_epochs= 2
+       	self.num_epochs= 1000
        	self.learning_rate= 0.001
-       	self.patience= 2
+       	self.patience= 10
        	self.loss_type= "conditional"
-       	self.norm_loss_by='align_len'
+       	self.norm_loss_by='desc_len'
        	self.early_stop_rtol=1e-5
        
        	self.t_grid_center= 0.1
@@ -103,11 +103,11 @@ class FakeArgparse:
         # self.lam = 0.5
        
         
-        # ### TKF92 model
-       	# self.indel_model_type= "TKF92_single"
-       	# self.tie_params= True
-        # self.lam = 0.5
-        # self.x=0.5
+        ### TKF92 model
+       	self.indel_model_type= "TKF92_single"
+       	self.tie_params= True
+        self.lam = 0.5
+        self.x=0.5
         
         
         # ### other single models
@@ -118,15 +118,15 @@ class FakeArgparse:
         # self.x=0.5
         
         
-        ### H20 model
-       	self.indel_model_type= "GGI_single"
-       	self.tie_params= True
+        # ### H20 model
+       	# self.indel_model_type= "GGI_single"
+       	# self.tie_params= True
            
-       	self.lam= 0.5
-       	self.x= 0.5
-       	self.diffrax_params= {'step': None,
-                                  'rtol': 1e-3,
-                                  'atol': 1e-6}
+       	# self.lam= 0.5
+       	# self.x= 0.5
+       	# self.diffrax_params= {'step': None,
+        #                           'rtol': 1e-3,
+        #                           'atol': 1e-6}
         
         
         # ### no indel model
