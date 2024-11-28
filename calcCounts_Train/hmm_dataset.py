@@ -25,12 +25,16 @@ outputs:
 
 Data to be read:
 =================
-1. Numpy matrix of sequences: a tensor of size (num_pairs, max_len, 2), where 
-   dim1 corresponds to-
-    - (dim1=0): aligned ancestor
-    - (dim1=1): aligned descendant
+1. Numpy matrix of aligned matrix info: a tensor of size (num_pairs, max_len, 4)
+   only need dim2=[0,1]
+   dim2=0: aligned ancestor (with <bos>, <eos>)
+   dim2=0: aligned descendant (with <bos>, <eos>)
 
-  All sequences have been categorically encoded (20 possible aa tokens + pad token)
+  All sequences have been categorically encoded (20 possible aa tokens + gap + pad)
+  - <pad> token is 0
+  - <bos> is understood to be 1 (will be removed)
+  - <eos> is understood to be 2 (will be removed)
+  - <gap> token is 43
   
 2. Numpy vector of amino acid counts; if this is the training dataloader, 
    you'll calculate the equilibrium distribution of amino acids from this
@@ -61,12 +65,24 @@ class HMMDset(Dataset):
         self.AAcounts = np.zeros(20, dtype=int)
         
         for split in split_prefixes:
-            ### sequences
-            with open(f'./{data_dir}/{split}_pair_alignments.npy', 'rb') as f:
-                data_mat_lst.append(np.load(f))
+            ### full matrix
+            with open(f'./{data_dir}/{split}_aligned_mats.npy', 'rb') as f:
+                raw_mat = np.load(f)[:,:,[0,1]]
+            
+            # remove bos, eos, convert to int32 for pytorch dataloaders
+            raw_mat = np.where(raw_mat != 2, raw_mat, 0)
+            raw_mat = raw_mat[:, 1:-1, :]
+            raw_mat = raw_mat.astype('int32')
+            data_mat_lst.append(raw_mat)
+            del raw_mat
             
             ### metadata
-            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'alignment_len', 'desc_seq_len']
+            cols_to_keep = ['pairID',
+                            'ancestor',
+                            'descendant',
+                            'pfam', 
+                            'alignment_len', 
+                            'desc_seq_len']
             metadata_list.append( pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
                                                sep='\t', 
                                                index_col=0,
@@ -116,45 +132,4 @@ class HMMDset(Dataset):
     
     def retrieve_equil_dist(self):
         return self.AAcounts / self.AAcounts.sum()
-    
-
-        
-
-##############################
-### TEST THE DATALOADER HERE #
-##############################
-if __name__ == '__main__':
-    # just testing that code works when subsOnly = True; FiveSamp_AAcounts is 
-    #   the same file as FiveSamp_AAcounts_subsOnly
-    subsOnly = True
-    data_dir = 'DEV-DATA_pair_alignments'
-    split_prefixes = ['fiftySamps']
-    
-    ### initialize the pytorch dataset object
-    dset = HMMDset(data_dir = data_dir,
-                   split_prefixes = split_prefixes,
-                   subsOnly = subsOnly)
-    
-    
-    ### create a dataloader that returns jax arrays
-    batch_size = len(dset)
-    dload = DataLoader(dset, 
-                       batch_size = batch_size, 
-                       shuffle = True,
-                       collate_fn = jax_collator)
-    
-    # sample outputs from the first batch
-    seqs, lens, sample_idxes = list(dload)[0]
-    
-    # use PairDset.retrieve_sample_names to get the ancestor, descendant
-    # and pfam names
-    names = dset.retrieve_sample_names(sample_idxes)
-    
-    # test out getting the maximum sequence length
-    print(dset.max_seqlen())
-    
-    # test out getting the equilibrium distribution vector
-    print(dset.retrieve_equil_dist())
-    
-    
     

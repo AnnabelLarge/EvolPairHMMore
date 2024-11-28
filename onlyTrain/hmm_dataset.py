@@ -15,8 +15,8 @@ outputs:
 ========
 1. sample_subCounts: substitution counts
 2. sample_insCounts: insert counts
-3. sample_transCounts: transition counts
-4. sample_align_len: length of this alignment
+3. sample_delCounts: deleted char counts
+4. sample_transCounts: transition counts
 5. sample_idx: pair index, to retrieve info from metadata_df
 
 
@@ -192,52 +192,4 @@ class HMMDset_PC(Dataset):
     
     def retrieve_equil_dist(self):
         return self.AAcounts / self.AAcounts.sum()
-    
-
-        
-
-# ##############################
-# ### TEST THE DATALOADER HERE #
-# ##############################
-# if __name__ == '__main__':
-#     data_dir = 'DEV-DATA_precalculated_counts'
-#     split_prefixes = ['KPROT_OOD_VALID']
-#     subsOnly = False
-    
-#     ### initialize the pytorch dataset object
-#     dset = HMMDset_PC(data_dir = data_dir,
-#                      split_prefixes = split_prefixes,
-#                      subsOnly = subsOnly)
-    
-#     ### create a dataloader that returns jax arrays
-#     batch_size = len(dset)
-#     dload = DataLoader(dset, 
-#                         batch_size = batch_size, 
-#                         shuffle = True,
-#                         collate_fn = jax_collator)
-    
-#     # sample outputs from the first batch
-#     out = list(dload)[0]
-#     sample_subCounts = out[0]
-#     sample_insCounts = out[1]
-#     sample_delCounts = out[2]
-#     sample_transCounts = out[3] 
-#     sample_align_len = out[4]
-#     sample_idx = out[5]
-#     del out
-    
-#     if subsOnly:
-#         assert jnp.allclose( jnp.zeros(sample_insCounts.shape), sample_insCounts)
-#         assert jnp.allclose( jnp.zeros(sample_delCounts.shape), sample_delCounts)
-#         assert jnp.allclose( jnp.zeros(sample_transCounts.shape), sample_transCounts)
-    
-#     # use PairDset.retrieve_sample_names to get the ancestor, descendant
-#     # and pfam names
-#     names = dset.retrieve_sample_names(sample_idx)
-    
-#     # test out getting the maximum sequence length
-#     print(dset.max_seqlen())
-    
-#     # test out getting the equilibrium distribution vector
-#     print(dset.retrieve_equil_dist())
     

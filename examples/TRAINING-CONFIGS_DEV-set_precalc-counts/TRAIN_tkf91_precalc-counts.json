@@ -5,10 +5,10 @@
 
 	"alphabet_size": 20, 
 	"have_precalculated_counts": true, 
-	"data_dir": "DEV_hmm_precalc_counts", 
-	"train_dset_splits": ["PF00001"], 
-	"test_dset_splits": ["PF00001"], 
-	"batch_size": 40, 
+	"data_dir": "DEV_hmm", 
+	"train_dset_splits": ["fortySamp"], 
+	"test_dset_splits": ["oneSamp","twoSamp","sevenSamp"], 
+	"batch_size": 10, 
 
 	"num_epochs": 100, 
 	"learning_rate": 0.01,

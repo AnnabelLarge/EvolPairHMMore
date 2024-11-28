@@ -1,2 +1,0 @@
-	file	matrix_size	matrix_dtype
-0	PF00001_pair_alignments.npy	(40, 700, 2)	int8
