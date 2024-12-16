@@ -76,8 +76,17 @@ def jax_collator(batch):
 
 
 class HMMDset_PC(Dataset):
-    def __init__(self, data_dir, split_prefixes, subsOnly):
-        ### iterate through split prefixes and read files
+    def __init__(self, 
+                 data_dir: str, 
+                 split_prefixes: list, 
+                 subsOnly: bool,
+                 single_time_from_file: bool,
+                 times_from_array: jnp.array,
+                 toss_alignments_longer_than = None):
+        #######################################################################
+        ### 1: ITERATE THROUGH SPLIT PREFIXES AND READ FILES   ################
+        #######################################################################
+        # always read
         subCounts_list = []
         insCounts_list = []
         delCounts_list = []
@@ -85,56 +94,117 @@ class HMMDset_PC(Dataset):
         self.AAcounts = np.zeros(20, dtype=int)
         metadata_list = []
         
+        # optionally read
+        if single_time_from_file:
+            times_lst = []
+        
+        # start iter
         for split in split_prefixes:
+            ##############
+            ### metadata #
+            ##############
+            cols_to_keep = ['pairID',
+                            'ancestor',
+                            'descendant',
+                            'pfam', 
+                            'alignment_len', 
+                            'desc_seq_len']
+            meta_df =  pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
+                                    sep='\t', 
+                                    index_col=0,
+                                    usecols = cols_to_keep )
+            meta_df = meta_df.reset_index(drop = True)
+            
+            
+            #########################################################
+            ### remove samples longer where                         #
+            ###   align_len + 2 > toss_alignments_longer_than       #
+            ###   (plus 2 to mimic the behavior in neural database, #
+            ###   which has <bos> and <eos>)                        #
+            #########################################################
+            if (toss_alignments_longer_than is not None):
+                cond = (meta_df['alignment_len'] + 2) <= toss_alignments_longer_than
+                idxes_to_keep = list( meta_df[ cond ].index )
+                
+                if len(idxes_to_keep) == 0:
+                    raise RuntimeError(f"no samples to keep from {split}!")
+                
+                meta_df = meta_df.iloc[idxes_to_keep]
+            
+            # otherwise, keep everything
+            else:
+                idxes_to_keep = list( meta_df.index )
+            
+            metadata_list.append(meta_df)
+            
+            
+            ######################################
+            ### counts of emissions, transitions #
+            ######################################
             # subEncoded
             with open(f'./{data_dir}/{split}_subCounts.npy', 'rb') as f:
-                mat = safe_convert( np.load(f) )
+                mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
                 subCounts_list.append( mat )
                 del mat
-            
-            # metadata
-            cols_to_keep = ['pairID','ancestor','descendant','pfam', 'alignment_len', 'desc_seq_len']
-            metadata_list.append( pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
-                                               sep='\t', 
-                                               index_col=0,
-                                               usecols = cols_to_keep) )
             
             if not subsOnly:
                 # insCounts
                 with open(f'./{data_dir}/{split}_insCounts.npy', 'rb') as f:
-                    mat = safe_convert( np.load(f) )
+                    mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
                     insCounts_list.append( mat )
                     del mat
                 
                 # delCounts
                 with open(f'./{data_dir}/{split}_delCounts.npy', 'rb') as f:
-                    mat = safe_convert( np.load(f) )
+                    mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
                     delCounts_list.append( mat )
                     del mat
                 
                 # transCounts
                 with open(f'./{data_dir}/{split}_transCounts.npy', 'rb') as f:
-                    mat = safe_convert( np.load(f) )
+                    mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
                     transCounts_list.append( mat )
                     del mat       
                 
-                # counts
+                # counts (technically uses amino acids from tossed samples... 
+                #   fix this later)
                 with open(f'./{data_dir}/{split}_AAcounts.npy', 'rb') as f:
                     mat = safe_convert( np.load(f) )
                     self.AAcounts += mat
                     del mat
                    
             else:
-                # counts
+                # counts (technically uses amino acids from tossed samples... 
+                #   fix this later)
                 with open(f'./{data_dir}/{split}_AAcounts_subsOnly.npy', 'rb') as f:
                     mat = safe_convert( np.load(f) )
                     self.AAcounts += mat
                     del mat
             
+            
+            #####################
+            ### (optional) time #
+            #####################
+            if single_time_from_file:
+                times = pd.read_csv(f'{data_dir}/{split}_pair-times.tsv', 
+                                    sep='\t',
+                                    header=None,
+                                    names=['pairID','time'],
+                                    index_col=None)
+                times = times.iloc[idxes_to_keep]
+                times_lst += times['time'].tolist()
+                del times
+            
             del split
                 
-            
-        ### concatenate all data matrices
+        
+        #######################################################################
+        ### 2: CONCATENATE ALL DATA MATRICES   ################################
+        #######################################################################
+        
+        ######################################
+        ### counts of emissions, transitions #
+        ######################################
         self.subCounts = np.concatenate(subCounts_list, axis=0)
         del subCounts_list
         
@@ -160,23 +230,44 @@ class HMMDset_PC(Dataset):
                                        dtype='int16')
             self.transCounts = np.zeros( (num_samps, 3, 3),
                                          dtype='int16')
-            
-        # little bit of post-processing after concatenating all dataframes
+        
+        ##############
+        ### metadata #
+        ##############
         self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
         del metadata_list
+        
+        
+        #####################
+        ### (optional) time #
+        #####################
+        if single_time_from_file:
+            self.times = np.array(times_lst) #(B,)
+            self.func_to_retrieve_time = self.return_single_time_per_samp
+            del times_lst
+        
+        elif not single_time_from_file:
+            self.times = times_from_array #(T,)
+            self.func_to_retrieve_time = self.return_time_array
+        
         
     def __len__(self):
         return self.insCounts.shape[0]
 
     def __getitem__(self, idx):
-        sample_subCounts = self.subCounts[idx, :]
-        sample_insCounts = self.insCounts[idx, :]
-        sample_delCounts = self.delCounts[idx, :]
-        sample_transCounts = self.transCounts[idx, :]
+        sample_subCounts = self.subCounts[idx, ...]
+        sample_insCounts = self.insCounts[idx, ...]
+        sample_delCounts = self.delCounts[idx, ...]
+        sample_transCounts = self.transCounts[idx, ...]
+        sample_time = self.func_to_retrieve_time(idx)
         sample_idx = idx
-        return (sample_subCounts, sample_insCounts, sample_delCounts, 
-                sample_transCounts, sample_idx)
+        return (sample_subCounts, 
+                sample_insCounts, 
+                sample_delCounts, 
+                sample_transCounts, 
+                sample_time,
+                sample_idx)
     
     def max_seqlen(self):
         # this is only used for pair alignments, but not precalculated counts
@@ -192,4 +283,23 @@ class HMMDset_PC(Dataset):
     
     def retrieve_equil_dist(self):
         return self.AAcounts / self.AAcounts.sum()
+    
+    
+    ################################
+    ### functions to manage time   #
+    ################################
+    def return_single_time_per_samp(self, idx):
+        # self.times is (B,)
+        return self.times[idx, None] #integer value
+    
+    def return_time_array(self, idx=None):
+        # self.times is (T,)
+        return self.times #array of size (T,)
+    
+    def retrieve_num_timepoints(self, times_from):
+        if times_from == 'geometric':
+            return self.times.shape[0]
+        
+        elif times_from == 'from_file':
+            return 1
     

@@ -36,7 +36,12 @@ lines_to_write.append('\t"have_precalculated_counts": [BOOL], \n')
 lines_to_write.append('\t"data_dir": [STR], \n')
 lines_to_write.append('\t"train_dset_splits": [list of STR], \n')
 lines_to_write.append('\t"test_dset_splits": [list of STR], \n')
-lines_to_write.append('\t"batch_size": [INT], \n')
+lines_to_write.append('\n')
+
+lines_to_write.append('\t"toss_alignments_longer_than": [INT], \n')
+lines_to_write.append('\t"times_from": [ STR: "from_file","geometric"], \n')
+lines_to_write.append('\t"batch_size": [INT = 1 if from_file, > 1 if geometric], \n')
+lines_to_write.append('\t"every_k_schedule": [ INT = 1 if geometric, > 1 if from_file ], \n')
 lines_to_write.append('\n')
 
 # training setup
@@ -45,7 +50,7 @@ lines_to_write.append('\t"learning_rate": [FLOAT], \n')
 lines_to_write.append('\t"patience": [INT], \n')
 lines_to_write.append('\t"early_stop_rtol": [FLOAT], \n')
 lines_to_write.append('\t"loss_type": [STR: "conditional","joint"], \n')
-lines_to_write.append('\t"norm_loss_by": [STR: "num_match_pos","desc_len","align_len"] \n')
+lines_to_write.append('\t"norm_loss_by": [STR: "num_match_pos","desc_len","align_len"], \n')
 lines_to_write.append('\n')
 
 # time grid
@@ -181,7 +186,7 @@ lines_to_write.append(f'\t"indel_model_type": "{indel_model_type}", \n')
 ### extra arguments for GGI_single
 if indel_model_type == 'GGI_single':
     # indel rates, extension probs
-    tie_params = input( "Assume one indel rate, one extension prob? (reversibility) (y/n)\n" )
+    tie_params = input( "Assume insert rate \approx deletion rate? (y/n)\n" )
     tie_params = str_to_bool(tie_params)
     
     if tie_params:

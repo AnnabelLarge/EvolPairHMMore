@@ -133,13 +133,6 @@ def train_pairhmm(args, dataloader_lst):
         test_global_max_seqlen = test_dset.max_seqlen()
     
     
-    ### quantize time in geometric spacing, just like in cherryML
-    quantization_grid = range(-(args.t_grid_num_steps-1), 
-                              args.t_grid_num_steps, 
-                              1)
-    t_array = jnp.array([(args.t_grid_center * args.t_grid_step**q_i) for q_i in quantization_grid])
-    
-    
     ###########################################################################
     ### 2: INITIALIZE MODEL   #################################################
     ###########################################################################
@@ -176,7 +169,11 @@ def train_pairhmm(args, dataloader_lst):
         hparams['gap_tok'] = args.gap_tok
     
     # add grid step to hparams dictionary; needed for marginaling over time
-    hparams['t_grid_step']= args.t_grid_step
+    num_timepoints = training_dset.retrieve_num_timepoints(times_from = args.times_from)
+    if num_timepoints > 1:
+        hparams['t_grid_step']= args.t_grid_step
+    else:
+        hparams['t_grid_step']= 0
     
     # combine models under one pairHMM
     pairHMM = (equl_model, subst_model, indel_model)
@@ -188,29 +185,26 @@ def train_pairhmm(args, dataloader_lst):
     print(f'3: main training loop')
     ### SETUP FOR TRAINING LOOP
     # initialize optax
-    tx = optax.adam(args.learning_rate)
+    base_optimizer = optax.adam(args.learning_rate)
+    tx = optax.MultiSteps(opt = base_optimizer,
+                          every_k_schedule = args.every_k_schedule)
+    
     opt_state = tx.init(params)
     
     # jit your functions; there's an extra function if you need to 
     #   summarize the alignment
     # for training function, automatically set debug=False
     parted_train_fn = partial(train_fn,
-                              t_arr = t_array,
                               loss_type = args.loss_type,
                               norm_loss_by = args.norm_loss_by,
                               DEBUG_FLAG = False)
-    jitted_train_fn = jax.jit(parted_train_fn) #, 
-                              # static_argnames=['loss_type',
-                              #                 'DEBUG_FLAG'])
+    jitted_train_fn = jax.jit(parted_train_fn)
     
     parted_eval_fn = partial(eval_fn,
-                             t_arr = t_array,
                              norm_loss_by = args.norm_loss_by,
                              loss_type = args.loss_type)
     jitted_eval_fn = jax.jit(parted_eval_fn,
                              static_argnames = ['DEBUG_FLAG'])  
-                             # static_argnames=['loss_type',
-                             #                  'DEBUG_FLAG'])
     
     if not args.have_precalculated_counts:
         parted_summary_fn = partial(summarize_alignment,
@@ -259,6 +253,7 @@ def train_pairhmm(args, dataloader_lst):
             
             # take a step using minibatch gradient descent
             out = jitted_train_fn(all_counts = allCounts, 
+                                  t_array = batch[-2],
                                   pairHMM = pairHMM, 
                                   params_dict = params, 
                                   hparams_dict = hparams,
@@ -328,6 +323,7 @@ def train_pairhmm(args, dataloader_lst):
             
             # evaluate batch loss
             out = jitted_eval_fn(all_counts = allCounts, 
+                                 t_array = batch[-2],
                                  pairHMM = pairHMM, 
                                  params_dict = params, 
                                  hparams_dict = hparams,
@@ -476,6 +472,7 @@ def train_pairhmm(args, dataloader_lst):
         
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
+                             t_array = batch[-2],
                              pairHMM = pairHMM, 
                              params_dict = best_params, 
                              hparams_dict = hparams,
@@ -532,6 +529,7 @@ def train_pairhmm(args, dataloader_lst):
         
         # evaluate batch loss
         out = jitted_eval_fn(all_counts = allCounts, 
+                             t_array = batch[-2],
                              pairHMM = pairHMM, 
                              params_dict = best_params, 
                              hparams_dict = hparams,

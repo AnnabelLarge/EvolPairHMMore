@@ -77,7 +77,7 @@ def logsumexp_withZeros(x, axis):
 ### MAIN FUNCTIONS   ##########################################################
 ###############################################################################
 def train_fn(all_counts, 
-             t_arr, 
+             t_array, 
              pairHMM, 
              params_dict, 
              hparams_dict, 
@@ -92,7 +92,7 @@ def train_fn(all_counts,
     inputs:
         > all_counts: precomputed counts, in this order- 
              subst, inserts, deleted chars, and transitions
-        > t_arr: array of evolutionary times you're evaluating the likelihood
+        > t_array: array of evolutionary times you're evaluating the likelihood
              at; sum them all together for final likelihood
         > pairHMM: tuple tying together equl_model, subst_model, and 
              indel_model (IN THAT ORDER)
@@ -116,6 +116,10 @@ def train_fn(all_counts,
     delCounts_persamp = all_counts[2] #(B, 20)
     transCounts_persamp = all_counts[3] #(B, 3, 3)
     del all_counts
+    
+    # t_array is always determined by first sample in the batch
+    # (T,)
+    t_array = t_array[0,:]
     
     # decide what length to normalize final loss by (default is
     #   ungapped descendant length)
@@ -177,7 +181,7 @@ def train_fn(all_counts,
         ##################################################################
         ### 1.2: logP(substitutions/matches) and logP(state transitions) #
         ##################################################################
-        # this function calculates logprob at one time, t; vmap this over t_arr
+        # this function calculates logprob at one time, t; vmap this over t_array
         def apply_model_at_t(t):
             ### 1.2.1: get the emission/transition matrices
             # retrieve substitution logprobs
@@ -217,15 +221,17 @@ def train_fn(all_counts,
                         marg_const_at_t)
             
             else:
-                return (logP_counts_sub_at_t, logP_counts_trans_at_t,
-                        marg_const_at_t, logprob_substitution_at_t, 
+                return (logP_counts_sub_at_t, 
+                        logP_counts_trans_at_t,
+                        marg_const_at_t, 
+                        logprob_substitution_at_t, 
                         logprob_transition_at_t)
             
         
         ### 1.2.3: vmap over the time array; return log probabilities 
         ###        PER TIME POINT and PER MIXTURE MODEL
         vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
-        out = vmapped_apply_model_at_t(t_arr)
+        out = vmapped_apply_model_at_t(t_array)
         
         # (time, batch, k_subst, k_equl)
         sub_logprobs_perTime_perMix = out[0]
@@ -331,10 +337,13 @@ def train_fn(all_counts,
         logP_perTime_withConst = (logP_perTime +
                                   jnp.expand_dims(marginalization_consts, 1))
         
-        ### 1.4.3: logsumexp across time dimension (dim0)
+        ### 1.4.3: logsumexp across time dimension, if more than one time (dim0)
         # (batch, )
-        logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
-                                   axis=0)
+        if t_array.shape[0] > 1:
+            logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
+                                               axis=0)
+        elif t_array.shape[0] == 1:
+            logP_perSamp = logP_perTime_withConst[0, :]
         
         # normalize by length of sequence (either ungapped descendant or 
         #   full alignment)
@@ -373,7 +382,7 @@ def train_fn(all_counts,
 
 
 def eval_fn(all_counts, 
-            t_arr, 
+            t_array, 
             pairHMM, 
             params_dict, 
             hparams_dict, 
@@ -387,7 +396,7 @@ def eval_fn(all_counts,
     inputs:
         > all_counts: precomputed counts, in this order- 
              subst, inserts, deleted chars, and transitions
-        > t_arr: array of evolutionary times you're evaluating the likelihood
+        > t_array: array of evolutionary times you're evaluating the likelihood
              at; sum them all together for final likelihood
         > pairHMM: tuple tying together equl_model, subst_model, and 
              indel_model (IN THAT ORDER)
@@ -407,6 +416,10 @@ def eval_fn(all_counts,
     delCounts_persamp = all_counts[2]
     transCounts_persamp = all_counts[3]
     del all_counts
+    
+    # t_array is always determined by first sample in the batch
+    # (T,)
+    t_array = t_array[0,:]
     
     # decide what length to normalize final loss by (default is
     #   ungapped descendant length)
@@ -465,7 +478,7 @@ def eval_fn(all_counts,
     ##################################################################
     ### 1.2: logP(substitutions/matches) and logP(state transitions) #
     ##################################################################
-    # this function calculates logprob at one time, t; vmap this over t_arr
+    # this function calculates logprob at one time, t; vmap this over t_array
     def apply_model_at_t(t):
         ### 1.2.1: get the emission/transition matrices
         # retrieve substitution logprobs
@@ -513,7 +526,7 @@ def eval_fn(all_counts,
     ### 1.2.3: vmap over the time array; return log probabilities 
     ###        PER TIME POINT and PER MIXTURE MODEL
     vmapped_apply_model_at_t = jax.vmap(apply_model_at_t)
-    out = vmapped_apply_model_at_t(t_arr)
+    out = vmapped_apply_model_at_t(t_array)
     
     # (time, batch, k_subst, k_equl)
     sub_logprobs_perTime_perMix = out[0]
@@ -620,8 +633,11 @@ def eval_fn(all_counts,
     
     ### 1.4.3: logsumexp across time dimension (dim0)
     # (batch, )
-    logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
-                                       axis=0)
+    if t_array.shape[0] > 1:
+        logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
+                                           axis=0)
+    elif t_array.shape[0] == 1:
+        logP_perSamp = logP_perTime_withConst[0, :]
     
     # normalize by length of sequence (either ungapped descendant or 
     #   full alignment)

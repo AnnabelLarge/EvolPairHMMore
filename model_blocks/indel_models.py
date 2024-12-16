@@ -671,7 +671,7 @@ class TKF91_single(GGI_single):
         # beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
         
         ### approximations as needed
-        # alpha = (1 - (lam*TKF_ERR*t) ) * jnp.exp(-lam*t)
+        # alpha = (1 - (lam*TKF_ERR*t) ) 
         beta = ( lam * t ) / ( lam*t + 1 )
         gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
         

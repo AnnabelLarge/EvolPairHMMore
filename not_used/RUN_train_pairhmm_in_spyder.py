@@ -67,14 +67,17 @@ class FakeArgparse:
         self.debug=True
        
        	self.alphabet_size= 20
-       	self.batch_size= 40
        	self.have_precalculated_counts= True
-           
-       	self.data_dir= "examples/DEV_hmm_precalc_counts"
-       	self.train_dset_splits= ["PF00001"]
-       	self.test_dset_splits= ["PF00001"]
+       	self.data_dir= "DATA_cherries"
+       	self.train_dset_splits= [f'FAMCLAN-CHERRIES_split{i}' for i in range(1,8)]
+       	self.test_dset_splits= [f'FAMCLAN-CHERRIES_split{i}' for i in [8,9]]
+
+        self.toss_alignments_longer_than=None
+        self.times_from='from_file'
+       	self.batch_size= 1
+        self.every_k_schedule=128
        
-       	self.num_epochs= 1000
+       	self.num_epochs= 2
        	self.learning_rate= 0.001
        	self.patience= 10
        	self.loss_type= "conditional"
@@ -98,16 +101,16 @@ class FakeArgparse:
         ### uncomment to test different indel models #
         ##############################################
         # ### TKF91 model
-       	# self.indel_model_type= "TKF91_single"
-       	# self.tie_params= True
-        # self.lam = 0.5
+       	self.indel_model_type= "TKF91_single"
+       	self.tie_params= True
+        self.lam = 0.5
        
         
         ### TKF92 model
-       	self.indel_model_type= "TKF92_single"
-       	self.tie_params= True
-        self.lam = 0.5
-        self.x=0.5
+       	# self.indel_model_type= "TKF92_single"
+       	# self.tie_params= True
+        # self.lam = 0.5
+        # self.x=0.5
         
         
         # ### other single models
@@ -139,6 +142,7 @@ class FakeArgparse:
 if __name__ == '__main__':
     import os
     import shutil
+    import jax
     
     from cli.train_pairhmm import train_pairhmm
     from utils.init_dataloaders import init_dataloaders
