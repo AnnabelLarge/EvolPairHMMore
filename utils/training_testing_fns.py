@@ -340,16 +340,17 @@ def train_fn(all_counts,
         ### 1.4.3: logsumexp across time dimension, if more than one time (dim0)
         # (batch, )
         if t_array.shape[0] > 1:
-            logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
+            logP_perSamp_before_length_norm = logsumexp_withZeros(logP_perTime_withConst,
                                                axis=0)
         elif t_array.shape[0] == 1:
-            logP_perSamp = logP_perTime_withConst[0, :]
+            logP_perSamp_before_length_norm = logP_perTime_withConst[0, :]
         
         # normalize by length of sequence (either ungapped descendant or 
         #   full alignment)
-        logP_perSamp = jnp.divide(logP_perSamp, length_for_normalization)
+        logP_perSamp = jnp.divide(logP_perSamp_before_length_norm, 
+                                  length_for_normalization)
 
-        # output sum to get larger average across all batches
+        # output sum OVER ALL SAMPLES to get larger average across all batches
         # (not just this particular batch)
         sum_logP = jnp.sum(logP_perSamp)
         
@@ -358,10 +359,12 @@ def train_fn(all_counts,
         
         if not DEBUG_FLAG:
             return loss, {'logP_perSamp': logP_perSamp,
+                          'logP_perSamp_before_length_norm': logP_perSamp_before_length_norm,
                           'sum_logP': sum_logP}
         
         else:
             to_add = {'logP_perSamp': logP_perSamp,
+                      'logP_perSamp_before_length_norm': logP_perSamp_before_length_norm,
                       'sum_logP': sum_logP,
                       'logP_perTime_withConst': logP_perTime_withConst}
             intermediate_values = {**intermediate_values, **to_add}
@@ -634,14 +637,15 @@ def eval_fn(all_counts,
     ### 1.4.3: logsumexp across time dimension (dim0)
     # (batch, )
     if t_array.shape[0] > 1:
-        logP_perSamp = logsumexp_withZeros(logP_perTime_withConst,
+        logP_perSamp_before_length_norm = logsumexp_withZeros(logP_perTime_withConst,
                                            axis=0)
     elif t_array.shape[0] == 1:
-        logP_perSamp = logP_perTime_withConst[0, :]
+        logP_perSamp_before_length_norm = logP_perTime_withConst[0, :]
     
     # normalize by length of sequence (either ungapped descendant or 
     #   full alignment)
-    logP_perSamp = jnp.divide(logP_perSamp, length_for_normalization)
+    logP_perSamp = jnp.divide(logP_perSamp_before_length_norm, 
+                              length_for_normalization)
 
     # return sum_logP, to do larger average over ALL batches (not just this one)
     sum_logP = jnp.sum(logP_perSamp)
@@ -652,13 +656,15 @@ def eval_fn(all_counts,
     if not DEBUG_FLAG:
         return ({'logP_perSamp': logP_perSamp,
                  'sum_logP': sum_logP,
+                 'logP_perSamp_before_length_norm': logP_perSamp_before_length_norm,
                  'loss': loss}, 
-                sum_logP)
+                loss)
     
     else:
         to_add = {'logP_perSamp': logP_perSamp,
                   'sum_logP': sum_logP,
+                  'logP_perSamp_before_length_norm': logP_perSamp_before_length_norm,
                   'loss': loss}
         intermediate_values = {**intermediate_values, **to_add}
-        return (intermediate_values, sum_logP)
+        return (intermediate_values, loss)
 

@@ -8,6 +8,9 @@ Created on Thu Mar  7 22:04:27 2024
 
 ABOUT:
 ======
+THIS VERSION OF CODE HAS PREVIOUS TKF ALPHA, BETA, GAMMA APPROXIMATION
+  (THAT I'M STRUGGLING TO DERIVE)
+
 Models of TRANSITIONS between match, insert, and delete states of a pairHMM:
 
 1. GGI_single

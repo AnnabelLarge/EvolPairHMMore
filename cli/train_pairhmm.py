@@ -505,7 +505,7 @@ def train_pairhmm(args, dataloader_lst):
         
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = training_dset.retrieve_sample_names(batch[-1])
-        batch_out_df['logP'] = np.array(aux_dict['sum_logP'])
+        batch_out_df['logP'] = np.array(aux_dict['logP_perSamp_before_length_norm'])
         batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
         batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
         
@@ -570,7 +570,7 @@ def train_pairhmm(args, dataloader_lst):
         
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = test_dset.retrieve_sample_names(batch[-1])
-        batch_out_df['logP'] = np.array(aux_dict['sum_logP'])
+        batch_out_df['logP'] = np.array(aux_dict['logP_perSamp_before_length_norm'])
         batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
         batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
         
