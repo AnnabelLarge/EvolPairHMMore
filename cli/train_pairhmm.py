@@ -273,11 +273,29 @@ def train_pairhmm(args, dataloader_lst):
                 raise RuntimeError('Stop after one pass; check intermediates')
             """
             
-            
             # update the parameters dictionary with optax
             updates, opt_state = tx.update(param_grads, opt_state)
             params = optax.apply_updates(params, updates)
             
+            
+            ### write parameters, gradients, and optimizer update size 
+            ###   as you train
+            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
+            for key, val in params.items():
+                writer.add_scalar(f'PARAMS | {key}', 
+                                  val.mean().item(), 
+                                  batch_epoch_idx)
+            
+            for key, val in param_grads.items():
+                writer.add_scalar(f'GRADIENTS | {key}', 
+                                  val.mean().item(), 
+                                  batch_epoch_idx)
+            
+            for key, val in updates.items():
+                writer.add_scalar(f'UPDATES | {key}', 
+                                  val.mean().item(), 
+                                  batch_epoch_idx)
+                
             # add to total loss for this epoch
             epoch_train_sum_logP += aux_dict['sum_logP']
         
@@ -292,7 +310,8 @@ def train_pairhmm(args, dataloader_lst):
         # if the training loss is nan, stop training
         if jnp.isnan(epoch_train_loss):
             with open(args.logfile_name,'a') as g:
-                g.write(f'NaN training loss at epoch {epoch_idx}')
+                g.write(f'NaN training loss at epoch {epoch_idx}\n\n')
+                
             raise ValueError(f'NaN training loss at epoch {epoch_idx}')
         
         # free up variables
@@ -421,8 +440,10 @@ def train_pairhmm(args, dataloader_lst):
         
     ### save params
     # undo the parameter transformations
+    untransf_params = {}
     for modelClass in pairHMM:
-        untransf_params = modelClass.undo_param_transform(best_params)
+        untransf_params = {**untransf_params,
+                           **modelClass.undo_param_transform(best_params)}
     
     # pickle the parameters, both transformed and not
     with open(f'{args.model_ckpts_dir}/params_dict.pkl','wb') as g:
@@ -444,7 +465,7 @@ def train_pairhmm(args, dataloader_lst):
         for key, val in untransf_params.items():
             g.write(f'{key}: {val}\n')
         g.write('\n')
-        g.write(f'FINAL LOG-LIKELIHOODS, RE-EVALUATING ALL DATA WITH BEST PARAMS:\n')
+        g.write(f'FINAL LOG-LIKELIHOODS, RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
     
     
     ###########################################
@@ -484,13 +505,18 @@ def train_pairhmm(args, dataloader_lst):
         
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = training_dset.retrieve_sample_names(batch[-1])
-        batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['logP'] = np.array(aux_dict['sum_logP'])
+        batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
         
         final_loglikes_train_set.append(batch_out_df)
     
     # concatenate values
     final_loglikes_train_set = pd.concat(final_loglikes_train_set)
-    final_ave_train_loss = final_loglikes_train_set['logP_perSamp'].mean()
+    final_ave_train_loss_raw = final_loglikes_train_set['logP'].mean()
+    final_ave_train_loss = final_loglikes_train_set['logP/normlength'].mean()
+    final_ave_train_perpl = final_loglikes_train_set['perplexity'].mean()
+    final_train_ece = np.exp(final_ave_train_loss)
     
     # save whole dataframe and remove from memory
     final_loglikes_train_set.to_csv(f'{args.training_wkdir}/train-set_loglikes.tsv', sep='\t')
@@ -498,7 +524,10 @@ def train_pairhmm(args, dataloader_lst):
     
     # update the logfile with final losses
     with open(args.logfile_name,'a') as g:
+        g.write(f'Training set average loglike (without length normalizing): {final_ave_train_loss_raw}\n')
         g.write(f'Training set average loglike: {final_ave_train_loss}\n')
+        g.write(f'Training set average perplexity: {final_ave_train_perpl}\n')
+        g.write(f'Training set exponentiated cross entropy: {final_train_ece}\n\n')
     
     # clean up variables
     del training_dl, training_dset, batch, batch_idx, rng_for_final_train
@@ -541,13 +570,18 @@ def train_pairhmm(args, dataloader_lst):
         
         # using batch_idx, generate the initial loss dataframe
         batch_out_df = test_dset.retrieve_sample_names(batch[-1])
-        batch_out_df['logP_perSamp'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['logP'] = np.array(aux_dict['sum_logP'])
+        batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
+        batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
         
         final_loglikes_test_set.append(batch_out_df)
     
     # concatenate values
     final_loglikes_test_set = pd.concat(final_loglikes_test_set)
-    final_ave_test_loss = final_loglikes_test_set['logP_perSamp'].mean()
+    final_ave_test_loss_raw = final_loglikes_test_set['logP'].mean()
+    final_ave_test_loss = final_loglikes_test_set['logP/normlength'].mean()
+    final_ave_test_perpl = final_loglikes_test_set['perplexity'].mean()
+    final_test_ece = np.exp(final_ave_test_loss)
     
     # save whole dataframe and remove from memory
     final_loglikes_test_set.to_csv(f'{args.training_wkdir}/test-set_loglikes.tsv', sep='\t')
@@ -555,7 +589,10 @@ def train_pairhmm(args, dataloader_lst):
     
     # update the logfile with final losses
     with open(args.logfile_name,'a') as g:
+        g.write(f'Test set average loglike (without length normalizing): {final_ave_test_loss_raw}\n')
         g.write(f'Test set average loglike: {final_ave_test_loss}\n')
+        g.write(f'Test set average perplexity: {final_ave_test_perpl}\n')
+        g.write(f'Test set exponentiated cross entropy: {final_test_ece}\n')
     
     # output the aux dict from the final batch, if debugging
     if DEBUG_FLAG:

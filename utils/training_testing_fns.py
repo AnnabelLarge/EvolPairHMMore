@@ -657,6 +657,7 @@ def eval_fn(all_counts,
     
     else:
         to_add = {'logP_perSamp': logP_perSamp,
+                  'sum_logP': sum_logP,
                   'loss': loss}
         intermediate_values = {**intermediate_values, **to_add}
         return (intermediate_values, sum_logP)
