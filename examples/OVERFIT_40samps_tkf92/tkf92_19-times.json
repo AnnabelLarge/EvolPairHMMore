@@ -1,0 +1,40 @@
+{
+	"training_wkdir": "RESULTS_tkf92_39-times",
+	"rng_seednum": 10,
+	"debug": true,
+
+	"alphabet_size": 20,
+	"have_precalculated_counts": true,
+	"data_dir": "examples/DEV_hmm", 
+	"train_dset_splits": ["fortySamp"], 
+	"test_dset_splits": ["fortySamp"], 
+	"toss_alignments_longer_than": null,
+	"batch_size": 10,
+	"every_k_schedule":1,
+
+	"num_epochs": 5000,
+	"learning_rate": 0.01,
+	"patience": 10,
+	"early_stop_rtol": 1e-5,
+	"loss_type": "conditional",
+	"norm_loss_by": "desc_len", 
+
+	"times_from": "geometric",
+	"t_grid_center": 0.1,
+	"t_grid_step": 1.1,
+	"t_grid_num_steps": 10,
+
+	"subst_model_type": "subst_base",
+	"subsOnly": false,
+	"norm": true,
+	"exch_files": "LG08_exchangeability_r.npy",
+	"gap_tok": 43,
+
+	"equl_model_type": "equl_base",
+
+	"indel_model_type": "TKF92_single",
+	"tie_params": false,
+	"lam": 0.05,
+	"offset": 0.1,
+	"r": 0.1
+}

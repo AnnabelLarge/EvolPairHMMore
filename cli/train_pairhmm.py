@@ -272,7 +272,6 @@ def train_pairhmm(args, dataloader_lst):
                 
                 raise RuntimeError('Stop after one pass; check intermediates')
             """
-            
             # update the parameters dictionary with optax
             updates, opt_state = tx.update(param_grads, opt_state)
             params = optax.apply_updates(params, updates)
@@ -297,14 +296,14 @@ def train_pairhmm(args, dataloader_lst):
                                   batch_epoch_idx)
                 
             # add to total loss for this epoch
-            epoch_train_sum_logP += aux_dict['sum_logP']
+            epoch_train_sum_logP += aux_dict['loss']
         
         
         ######################################################
         ### GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD   #
         ######################################################
         # aggregate by dividing the sum by the total number of training samples
-        epoch_train_loss = float( -( epoch_train_sum_logP/len(training_dset) ) )
+        epoch_train_loss = float( ( epoch_train_sum_logP/len(training_dset) ) )
         writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
         # if the training loss is nan, stop training
@@ -360,7 +359,7 @@ def train_pairhmm(args, dataloader_lst):
         ### GET THE AVERAGE EPOCH TEST LOSS AND RECORD   #
         ##################################################
         # aggregate by dividing the sum by the total number of training samples
-        epoch_test_loss = float( -( epoch_test_sum_logP/len(test_dset) ) )
+        epoch_test_loss = float( ( epoch_test_sum_logP/len(test_dset) ) )
         writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
         del epoch_test_sum_logP, batch
         
@@ -507,7 +506,7 @@ def train_pairhmm(args, dataloader_lst):
         batch_out_df = training_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP'] = np.array(aux_dict['logP_perSamp_before_length_norm'])
         batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
+        batch_out_df['perplexity'] = np.exp(-batch_out_df['logP/normlength'])
         
         final_loglikes_train_set.append(batch_out_df)
     
@@ -516,7 +515,7 @@ def train_pairhmm(args, dataloader_lst):
     final_ave_train_loss_raw = final_loglikes_train_set['logP'].mean()
     final_ave_train_loss = final_loglikes_train_set['logP/normlength'].mean()
     final_ave_train_perpl = final_loglikes_train_set['perplexity'].mean()
-    final_train_ece = np.exp(final_ave_train_loss)
+    final_train_ece = np.exp(-final_ave_train_loss)
     
     # save whole dataframe and remove from memory
     final_loglikes_train_set.to_csv(f'{args.training_wkdir}/train-set_loglikes.tsv', sep='\t')
@@ -572,7 +571,7 @@ def train_pairhmm(args, dataloader_lst):
         batch_out_df = test_dset.retrieve_sample_names(batch[-1])
         batch_out_df['logP'] = np.array(aux_dict['logP_perSamp_before_length_norm'])
         batch_out_df['logP/normlength'] = np.array(aux_dict['logP_perSamp'])
-        batch_out_df['perplexity'] = np.exp(batch_out_df['logP/normlength'])
+        batch_out_df['perplexity'] = np.exp(-batch_out_df['logP/normlength'])
         
         final_loglikes_test_set.append(batch_out_df)
     
@@ -581,7 +580,7 @@ def train_pairhmm(args, dataloader_lst):
     final_ave_test_loss_raw = final_loglikes_test_set['logP'].mean()
     final_ave_test_loss = final_loglikes_test_set['logP/normlength'].mean()
     final_ave_test_perpl = final_loglikes_test_set['perplexity'].mean()
-    final_test_ece = np.exp(final_ave_test_loss)
+    final_test_ece = np.exp(-final_ave_test_loss)
     
     # save whole dataframe and remove from memory
     final_loglikes_test_set.to_csv(f'{args.training_wkdir}/test-set_loglikes.tsv', sep='\t')
