@@ -296,14 +296,14 @@ def train_pairhmm(args, dataloader_lst):
                                   batch_epoch_idx)
                 
             # add to total loss for this epoch
-            epoch_train_sum_logP += aux_dict['loss']
+            epoch_train_sum_logP += aux_dict['sum_logP']
         
         
         ######################################################
         ### GET THE AVERAGE EPOCH TRAINING LOSS AND RECORD   #
         ######################################################
         # aggregate by dividing the sum by the total number of training samples
-        epoch_train_loss = float( ( epoch_train_sum_logP/len(training_dset) ) )
+        epoch_train_loss = -float( epoch_train_sum_logP/len(training_dset) )
         writer.add_scalar('Loss/training set', epoch_train_loss, epoch_idx)
 
         # if the training loss is nan, stop training
@@ -359,7 +359,7 @@ def train_pairhmm(args, dataloader_lst):
         ### GET THE AVERAGE EPOCH TEST LOSS AND RECORD   #
         ##################################################
         # aggregate by dividing the sum by the total number of training samples
-        epoch_test_loss = float( ( epoch_test_sum_logP/len(test_dset) ) )
+        epoch_test_loss = -float( epoch_test_sum_logP/len(test_dset) )
         writer.add_scalar('Loss/test set', epoch_test_loss, epoch_idx)
         del epoch_test_sum_logP, batch
         

@@ -236,6 +236,12 @@ class HMMDset_PC(Dataset):
         ##############
         self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
+        
+        # add 1 for eos tokens 
+        #   (don't add anything for <bos> tokens, since you never predict that)
+        self.names_df['desc_seq_len'] += 1
+        self.names_df['alignment_len'] += 1
+    
         del metadata_list
         
         

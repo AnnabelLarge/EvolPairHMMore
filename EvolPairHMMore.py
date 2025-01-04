@@ -15,7 +15,6 @@ from cli.eval_pairhmm import eval_pairhmm as eval_hmm
 from cli.eval_subs_only import eval_subs_only as eval_hmm_subs_only
 from utils.init_dataloaders import init_dataloaders
 
-# jax.config.update("jax_enable_x64", True)
 
 
 # for now, running models on single GPU
@@ -49,8 +48,8 @@ parser.add_argument('-configs',
 ### parse the arguments
 args = parser.parse_args()
 
-# args.task = 'train_hmm'
-# args.configs = 'h20_oneSampEPH.json'
+# args.task = 'train_hmm_batched'
+# args.configs = 'CONFIGS_pairHMM'
 
 
 ### helper function to open a single config file and extract additional arguments
@@ -73,7 +72,6 @@ if args.task == 'train_hmm':
     args = read_config_file(args, args.configs)
     
     dataloader_lst = init_dataloaders(args, onlyTest=False)
-    
     train_hmm(args = args, 
               dataloader_lst = dataloader_lst)
         

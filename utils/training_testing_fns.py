@@ -138,6 +138,10 @@ def train_fn(all_counts,
         length_for_normalization = ( num_matches + 
                                      num_ins +
                                      num_dels ) #(B, )
+    
+    # sentinal token is <eos> (as a match); add one to include it in length
+    #   calculation
+    length_for_normalization += 1
         
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
@@ -441,6 +445,10 @@ def eval_fn(all_counts,
                                      num_ins +
                                      num_dels ) #(B, )
     
+    # sentinal token is <eos> (as a match); add one to include it in length
+    #   calculation
+    length_for_normalization += 1
+    
     # unpack model tuple
     equl_model, subst_model, indel_model = pairHMM
     del pairHMM
@@ -666,5 +674,5 @@ def eval_fn(all_counts,
                   'logP_perSamp_before_length_norm': logP_perSamp_before_length_norm,
                   'loss': loss}
         intermediate_values = {**intermediate_values, **to_add}
-        return (intermediate_values, loss)
+        return (intermediate_values, sum_logP)
 
