@@ -116,18 +116,6 @@ def log_one_minus_x(x):
     
     return out
 
-def log_one_minus_x_div_2(x):
-    """
-    log( 1 - x/2 )
-    """
-    return log_one_minus_x(x/2)
-
-def log_one_plus_x_squared_div_2(x):
-    """
-    log( 1 + x^2/2 )
-    """
-    return jnp.log1p(0.5 * x**2)
-
 
 
 ###############################################################################
@@ -606,24 +594,27 @@ class TKF91_single(GGI_single):
         # first, check if "indel_rate" or "lam" are provided
         if 'indel_rate' in provided_args:
             lam = argparse_obj.indel_rate
+            mu = lam / (1 - TKF_ERR)
         
-        elif 'lam' in provided_args:
-            lam = argparse_obj.lam
-            
-        # otherwise, default to 0.5
+        # if this isn't provided, see if lam or offset are provided; check these
+        # seperately, in the weird case you may provide one but not the other
         else:
-            lam = 0.5
-            
-            
-        if 'offset' not in provided_args:
-            offset = 0.0001
-        else:
-            offset = argparse_obj.offset
+            # lam; DEFAULT=0.5
+            if 'lam' in provided_args:
+                lam = argparse_obj.lam
+            else:
+                lam = 0.5
+                
+            # offset (for mu); DEFAULT=0.1
+            if 'offset' in provided_args:
+                offset = argparse_obj.offset
+            else:
+                offset = 0.1
         
         
         ### PARAMETER: birth rate lambda
         # transform to (-inf, inf) domain; also add extra k_indel dimension
-        lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
+        lam_transf = jnp.sqrt(lam)[..., None]
         
         # create output param dictionary
         initialized_params = {'lam_transf': lam_transf}
@@ -631,13 +622,9 @@ class TKF91_single(GGI_single):
         
         ### PARAMETER: offset needed to calculate mu
         if not self.tie_params:
-            # also transform domain
-            offset_transf = jnp.expand_dims(jnp.sqrt(offset), -1)
-            
-            # add to param dict
-            to_add = {'offset_transf': offset_transf}
-            initialized_params = {**initialized_params, **to_add}
-            del to_add
+            # also transform offset to (-inf, inf)
+            offset_transf = jnp.sqrt(-jnp.log(offset))[..., None]
+            initialized_params['offset_transf'] = offset_transf
         
         return initialized_params, dict()
         
@@ -650,8 +637,8 @@ class TKF91_single(GGI_single):
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
         ### indel params
-        lam, mu = self.get_lambda_mu(params_dict)
-        out_dict = self.log_TKF_coeffs(lam, mu, t)
+        lam, mu, use_approx = self.logits_to_indel_rates(params_dict)
+        out_dict = self.tkf_params(lam, mu, t, use_approx)
         
         
         ### entries in the matrix
@@ -684,35 +671,26 @@ class TKF91_single(GGI_single):
         WHEN IS THIS CALLED: when writing params to JSON file
         OUTPUTS: parameter dictionary, with transformed params
         """
-        ### lambda
-        lam_transf = params_dict['lam_transf']
-        lam = jnp.square(lam_transf)
+        lam, mu, use_approx = self.logits_to_indel_rates(params_dict)
         
-    
-        ### offset for mu
-        if not self.tie_params:
-            offset_transf = params_dict['offset_transf']
-            offset = jnp.square(offset_transf)
-            mu = lam*(1+TKF_ERR) + offset
-            
-            out_dict = {'lam': lam,
-                        'mu': mu,
-                        'offset': offset}
+        out_dict = {'lam_transf': params_dict['lam_transf'],
+                    'use_approx': use_approx}
         
-        else:
-            indel_rate = lam
-            out_dict = {'indel_rate': lam}
+        if self.tie_params:
+            # combine lambda and mu under label "indel rate"
+            out_dict['indel_rate'] = lam
         
-        
-        # for the heck of it, also add logit values
-        out_dict['lam_transf'] = lam_transf
-        out_dict['offset_transf'] = params_dict.get('offset_transf', 'not used')
+        elif not self.tie_params:
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['offset'] = offset
+            out_dict['offset_transf'] = params_dict['offset_transf']
         
         return out_dict
     
     
     ################   v__(extra functions placed below)__v   ################
-    def get_lambda_mu(self, params_dict):
+    def logits_to_indel_rates(self, params_dict):
         ### Lambda: unpack params, undo domain transf
         lam_transf = params_dict['lam_transf']
         lam = jnp.square(lam_transf)
@@ -721,32 +699,26 @@ class TKF91_single(GGI_single):
         ### Offset for mu
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
-            offset = jnp.square(offset_transf)
-            mu = lam*(1+TKF_ERR) + offset
+            offset = jnp.exp(-jnp.square(r_transf))
+            mu = lam/(1-offset)
+            use_approx = (offset <= TKF_ERR).any()
         
         else:
-            mu = lam*(1+TKF_ERR)
+            mu = lam/(1-TKF_ERR)
+            use_approx = True
         
-        return lam, mu
+        return lam, mu, use_approx
             
             
-    def log_TKF_coeffs(self, lam, mu, t):
-        """
-        previously used more stable approximation of beta:
-          beta = (lam*t)/(lam*t + 1)
-          noted valid if (lam * TKF_ERR * t) << 1
-         
-        original code:
-        --------------
-        ## original calculations
-        alpha = jnp.exp(-mu*t)
-        # beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
-        
-        ## approximations as needed
-        # alpha = (1 - (lam*TKF_ERR*t) ) 
-        beta = ( lam * t ) / ( lam*t + 1 )
-        """
-        # all area also (k_indel, )
+    def tkf_params(self, 
+                   lam, 
+                   mu, 
+                   t, 
+                   use_approx):
+        #############################################
+        ### parameters in common with both formulas #
+        #############################################
+        ### all dims are also (k_indel, )
         log_lam = safe_log(lam) 
         log_mu = safe_log(mu)
         mu_per_t = mu * t 
@@ -754,49 +726,16 @@ class TKF91_single(GGI_single):
         log_mu_t = safe_log(mu_per_t)
         log_lam_t = safe_log(lam_per_t)
         
+        ### alpha and one minus alpha IN LOG SPACE; (k_indel, )
+        # alpha = jnp.exp(-mu_per_t); log(alpha) = -mu_per_t
+        log_alpha = -mu_per_t
+        log_one_minus_alpha = log_one_minus_x(log_alpha)
         
-        #####################################################
-        ### if lambda \approx mu, then use approximations   #
-        #####################################################
-        if self.tie_params:
-            ### alpha = 1 - mu*t + 0.5*(mu*2)**2
-            # log(alpha) = log( 1 - exp(log(mu*t)) + 0.5 * exp(2 * log(mu*t)) )
-            alpha_coeffs = jnp.array([1, -1, 0.5])
-            alpha_arr_lst = [jnp.zeros( log_mu_t.shape ),
-                             log_mu_t,
-                             2 * log_mu_t]
-            
-            log_alpha = logsumexp_with_arr_lst(arr_lst = alpha_arr_lst, 
-                                               coeffs = alpha_coeffs)
-            del alpha_coeffs, alpha_arr_lst
-            
+        #############################################
+        ### original calculation of tkf beta, gamma #
+        #############################################
+        def orig_tkf_params(lam, mu, t_array):
             ### beta
-            beta_term2_arr_lst = [ safe_log( 1 - (mu_per_t/2) ),
-                                   safe_log( 1 - (lam_per_t/2) ) ]
-            beta_term3_arr_lst = [ log_one_plus_x_squared_div_2(lam_per_t),
-                                    log_one_plus_x_squared_div_2(mu_per_t) ]
-            beta_coeffs = concat_along_new_last_axis([mu, -lam])
-            
-            term2_logsumexp = logsumexp_with_arr_lst(arr_lst = beta_term2_arr_lst,
-                                                     coeffs = beta_coeffs)
-            
-            term3_logsumexp = logsumexp_with_arr_lst(arr_lst = beta_term3_arr_lst,
-                                                     coeffs = beta_coeffs)
-            
-            log_beta = log_lam_t + term2_logsumexp - term3_logsumexp
-            del beta_term2_arr_lst, beta_term3_arr_lst, beta_coeffs
-            del term2_logsumexp, term3_logsumexp
-            
-        
-        ########################################
-        ### otherwise, use calculation as-is   #
-        ########################################
-        elif not self.tie_params:
-            ### alpha and one minus alpha IN LOG SPACE
-            # alpha = jnp.exp(-mu_per_t); log(alpha) = -mu_per_t
-            log_alpha = -mu_per_t
-            
-            ### beta and one minus beta IN LOG SPACE
             # log( exp(-lambda * t) - exp(-mu * t) )
             term2_logsumexp = logsumexp_with_arr_lst( [-lam_per_t, -mu_per_t],
                                                       coeffs = jnp.array([1, -1]) )
@@ -811,46 +750,74 @@ class TKF91_single(GGI_single):
             log_beta = log_lam + term2_logsumexp - term3_logsumexp
             
             
+            ### gamma, one minus gamma IN LOG SPACE
+            # numerator = mu * beta; log(numerator) = log(mu) + log(beta)
+            gamma_numerator = log_mu + log_beta
             
-        ###########################################
-        ### gamma, one minus gamma IN LOG SPACE   #
-        ###########################################
-        # first: log(1-alpha) and log(1-beta)
-        log_one_minus_beta = log_one_minus_x(log_beta)
-        log_one_minus_alpha = log_one_minus_x(log_alpha)
+            # denom = lambda * (1-alpha); log(denom) = log(lam) + log(1-alpha)
+            gamma_denom = log_lam + log_one_minus_alpha
+            
+            # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
+            log_one_minus_gamma = gamma_numerator - gamma_denom
+            
+            return(log_beta, log_one_minus_x, False)
+            
         
-        # numerator = mu * beta; log(numerator) = log(mu) + log(beta)
-        gamma_numerator = log_mu + log_beta
+        #################################
+        ### approximates of beta, gamma #
+        #################################
+        def approx_tkf_params(lam, mu, t_array):
+            ### beta
+            log_beta = ( safe_log(1 - self.tkf_err) + 
+                         safe_log(lam_per_t) - 
+                         safe_log(lam_per_t + 1) )
+            
+            
+            ### gamma
+            # numerator = mu * t; log(numerator) = log(mu * t)
+            gamma_numerator = safe_log(mu_per_t)
+            
+            # denom = (1-alpha) (mu_per_t + 1); log(denom) = log(1-alpha) + log(mu_per_t + 1)
+            gamma_denom = log_one_minus_alpha + safe_log(mu_per_t + 1)
+            
+            # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
+            log_one_minus_gamma = gamma_numerator - gamma_denom
+            
+            return(log_beta, log_one_minus_gamma, True)
         
-        # denom = lambda * (1-alpha); log(denom) = log(alph) + log(1-alpha)
-        gamma_denom = log_lam + log_one_minus_alpha
         
-        # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
-        # TODO: I keep having trouble with numerator > denom here
-        log_one_minus_gamma = gamma_numerator - gamma_denom
+        ##############################
+        ### finish and output values #
+        ##############################
+        # if any of the mu values are close, then use the approx. function
+        #   not great... but more efficient than scanning over every value
+        out = jax.lax.cond( use_approx,
+                            orig_tkf_params,
+                            approx_tkf_params,
+                            lam, mu, t)
+        log_beta, log_one_minus_gamma, used_approx = out
+        del out
         
-        # gamma = 1 - (1-gamma)
-        # log(gamma) = log_one_minus_x(1 - gamma)
         log_gamma = log_one_minus_x(log_one_minus_gamma)
-        
+        log_one_minus_beta = log_one_minus_x(log_beta)
+            
         out_dict = {'log_alpha': log_alpha,
                     'log_beta': log_beta,
                     'log_gamma': log_gamma,
                     'log_one_minus_alpha': log_one_minus_alpha,
                     'log_one_minus_beta': log_one_minus_beta,
-                    'log_one_minus_gamma': log_one_minus_gamma 
+                    'log_one_minus_gamma': log_one_minus_gamma,
+                    'used_tkf_approx': used_approx
                     }
-            
+        
         return out_dict
-    
-
-
+        
 
 ###############################################################################
 ### TKF92_single   ############################################################
 ###############################################################################
-# inherits the following from TKF91_single: __init__, log_TKF_coeffs, 
-#   get_lambda_mu, pytree transformation functions
+# inherits the following from TKF91_single: __init__, tkf_params, 
+#   logits_to_indel_rates, pytree transformation functions
 class TKF92_single(TKF91_single):
     def initialize_params(self, argparse_obj):
         """
@@ -883,7 +850,7 @@ class TKF92_single(TKF91_single):
         #   tying weights
         if 'indel_rate' in provided_args:
             lam = argparse_obj.indel_rate
-            mu = lam*(1+TKF_ERR)
+            mu = lam / (1 - TKF_ERR)
         
         # if this isn't provided, see if lam or offset are provided; check these
         # seperately, in the weird case you may provide one but not the other
@@ -894,30 +861,30 @@ class TKF92_single(TKF91_single):
             else:
                 lam = 0.5
             
-            # offset (for mu); DEFAULT=0.0001
+            # offset (for mu); DEFAULT=0.1
             if 'offset' in provided_args:
                 offset = argparse_obj.offset
             else:
-                offset = 0.0001
+                offset = 0.1
         
         
         ### PARAMETERS: extension probability
-        # first, check if "extension_prob" is provided, meaning you're 
-        #   tying weights
+        # first, check if r was provided (extension probability); could be
+        #   under several names... which is annoying
         if 'extension_prob' in provided_args:
             r = argparse_obj.extension_prob
         
-        # if this isn't provided, it'll actually be called r
+        elif 'r' in provided_args:
+            r = argparse_obj.r
+        
+        # default is 0.5
         else:
-            if 'r' in provided_args:
-                r = argparse_obj.r
-            else:
-                r = 0.5
+            r = 0.5
                 
         ### keep lambda and r
         # transform to (-inf, inf) domain; also add extra k_indel dimension
-        lam_transf = jnp.expand_dims(jnp.sqrt(lam), -1)
-        r_transf = jnp.expand_dims(jnp.sqrt(-jnp.log(r)), -1)
+        lam_transf =  jnp.sqrt(lam)[..., None]
+        r_transf = jnp.sqrt(-jnp.log(r))[..., None]
         
         # create output param dictionary
         initialized_params = {'lam_transf': lam_transf,
@@ -925,7 +892,8 @@ class TKF92_single(TKF91_single):
         
         ### if not tying weights, add offset separately
         if not self.tie_params:
-            offset_transf = jnp.expand_dims(jnp.sqrt(offset), -1)
+            # also transform offset to (-inf, inf)
+            offset_transf = jnp.sqrt(-jnp.log(offset))[..., None]
             initialized_params['offset_transf'] = offset_transf
             
         return initialized_params, dict()
@@ -939,10 +907,10 @@ class TKF92_single(TKF91_single):
         OUTPUTS: logP(transitions); the GGI transition matrix
         """
         ### indel params
-        lam, mu = self.get_lambda_mu(params_dict)
+        lam, mu, use_approx = self.logits_to_indel_rates(params_dict)
         r_transf = params_dict['r_transf']
         r_fragment_len = jnp.exp(-jnp.square(r_transf))
-        out_dict = self.log_TKF_coeffs(lam, mu, t)
+        out_dict = self.tkf_params(lam, mu, t, use_approx)
         
         
         ### entries in the matrix
@@ -1021,42 +989,24 @@ class TKF92_single(TKF91_single):
         WHEN IS THIS CALLED: when writing params to JSON file
         OUTPUTS: parameter dictionary, with transformed params
         """
-        ### lambda and x are guaranteed to be there
-        # unpack parameters
-        lam_transf = params_dict['lam_transf']
+        lam, mu, use_approx = self.logits_to_indel_rates(params_dict)
         r_transf = params_dict['r_transf']
-        
-        # undo domain transformation
-        lam = jnp.square(lam_transf)
         r = jnp.exp(-jnp.square(r_transf))
         
-        out_dict = {}
-        if not self.tie_params:
-            ### mu and y are independent params
-            # unpack params
-            offset_transf = params_dict['offset_transf']
-            
-            # undo domain transformation
-            offset = jnp.square(offset_transf)
-            mu = lam*(1+TKF_ERR) + offset
-            
-            # add to output dictionary
-            out_dict['lam'] = lam
-            out_dict['mu'] = mu
-            out_dict['offset'] = offset
+        out_dict = {'lam_transf': params_dict['lam_transf'],
+                    'r_transf': r_transf,
+                    'extension_prob': r,
+                    'use_approx': use_approx}
         
-        else:
-            ### mu takes on value of lambda,
+        if self.tie_params:
             # combine lambda and mu under label "indel rate"
             out_dict['indel_rate'] = lam
         
-        ### add extension probability to output dict
-        out_dict['extension_prob'] = r
-        
-        # for the heck of it, also add logit values
-        out_dict['lam_transf'] = lam_transf
-        out_dict['r_transf'] = r_transf
-        out_dict['offset_transf'] = params_dict.get('offset_transf', 'not used')
+        elif not self.tie_params:
+            out_dict['lam'] = lam
+            out_dict['mu'] = mu
+            out_dict['offset'] = offset
+            out_dict['offset_transf'] = params_dict['offset_transf']
         
         return out_dict
 
