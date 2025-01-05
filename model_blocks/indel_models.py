@@ -769,8 +769,8 @@ class TKF91_single(GGI_single):
         def approx_tkf_params(lam, mu, t_array):
             ### beta
             log_beta = ( safe_log(1 - self.tkf_err) + 
-                         safe_log(lam_per_t) - 
-                         safe_log(lam_per_t + 1) )
+                         safe_log(mu_per_t) - 
+                         safe_log(mu_per_t + 1) )
             
             
             ### gamma
