@@ -683,8 +683,8 @@ class TKF91_single(GGI_single):
         elif not self.tie_params:
             out_dict['lam'] = lam
             out_dict['mu'] = mu
-            out_dict['offset'] = offset
             out_dict['offset_transf'] = params_dict['offset_transf']
+            out_dict['offset'] = jnp.exp(-jnp.square(params_dict['offset_transf']))
         
         return out_dict
     
@@ -699,7 +699,7 @@ class TKF91_single(GGI_single):
         ### Offset for mu
         if not self.tie_params:
             offset_transf = params_dict['offset_transf']
-            offset = jnp.exp(-jnp.square(r_transf))
+            offset = jnp.exp(-jnp.square(offset_transf))
             mu = lam/(1-offset)
             use_approx = (offset <= TKF_ERR).any()
         
@@ -760,7 +760,7 @@ class TKF91_single(GGI_single):
             # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
             log_one_minus_gamma = gamma_numerator - gamma_denom
             
-            return(log_beta, log_one_minus_x, False)
+            return(log_beta, log_one_minus_gamma, False)
             
         
         #################################
@@ -768,7 +768,7 @@ class TKF91_single(GGI_single):
         #################################
         def approx_tkf_params(lam, mu, t_array):
             ### beta
-            log_beta = ( safe_log(1 - self.tkf_err) + 
+            log_beta = ( safe_log(1 - TKF_ERR) + 
                          safe_log(mu_per_t) - 
                          safe_log(mu_per_t + 1) )
             
@@ -1005,7 +1005,7 @@ class TKF92_single(TKF91_single):
         elif not self.tie_params:
             out_dict['lam'] = lam
             out_dict['mu'] = mu
-            out_dict['offset'] = offset
+            out_dict['offset'] = jnp.exp(-jnp.square(params_dict['offset_transf']))
             out_dict['offset_transf'] = params_dict['offset_transf']
         
         return out_dict
